@@ -1,0 +1,7 @@
+{
+  "name": "Ety.ai - Telegram Explorer",
+  "description": "A Telegram Mini App for exploring word etymologies, definitions, and sharing insights powered by Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
