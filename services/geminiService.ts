@@ -1,6 +1,16 @@
-/// <reference types="vite/client" />
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { WordData } from '../types';
+
+// Fix for missing types in current environment
+declare global {
+  interface ImportMetaEnv {
+    VITE_GEMINI_API_KEY?: string;
+    DEV: boolean;
+  }
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
+}
 
 // Helper to decode base64 audio
 const decodeAudio = (base64: string): ArrayBuffer => {
@@ -50,7 +60,7 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-latest',
         contents: `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details.`,
         config: {
           responseMimeType: 'application/json',
@@ -106,7 +116,7 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-latest',
         contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
       });
       return response.text || "No summary available.";

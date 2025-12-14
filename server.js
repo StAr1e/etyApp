@@ -112,7 +112,7 @@ app.get('/api/details', async (req, res) => {
 
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-latest',
             contents: prompt,
             config: {
                 responseMimeType: 'application/json',
@@ -140,7 +140,7 @@ app.get('/api/summary', async (req, res) => {
 
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-flash-latest',
             contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
         });
         res.json({ summary: result.text });

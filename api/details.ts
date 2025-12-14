@@ -49,7 +49,7 @@ export default async function handler(request: any, response: any) {
     const prompt = `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details. If the word is misspelled, analyze the closest correct word.`;
 
     const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-flash-latest',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
