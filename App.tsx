@@ -234,54 +234,50 @@ export default function App() {
       {/* Content Container */}
       <div className="w-full max-w-2xl mx-auto relative z-10 min-h-screen flex flex-col p-4 md:p-6">
         
-        {/* Top Bar: Unified Profile & Gamification Header */}
-        <div className={`transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
-           <button 
-             onClick={() => user ? setShowProfile(true) : handleLogin()} 
-             className="flex items-center gap-4 w-full text-left group"
-           >
-              {/* Avatar + Level Badge */}
-              <div className="relative shrink-0">
-                {user?.photo_url ? (
-                   <img src={user.photo_url} alt="Profile" className="w-14 h-14 rounded-full border-2 border-tg-bg shadow-sm ring-2 ring-tg-secondaryBg" />
-                ) : (
-                   <div className="w-14 h-14 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-xl font-bold border-2 border-tg-bg shadow-sm ring-2 ring-tg-secondaryBg">
-                     {user?.first_name ? user.first_name[0] : <UserIcon size={24} />}
+        {/* Top Bar: Split Layout (Stats Left, User Right) */}
+        <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
+           
+           {/* Level / XP Bar */}
+           <button onClick={() => setShowProfile(true)} className="flex items-center gap-3 group">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-tg-button to-purple-500 flex items-center justify-center text-white font-bold shadow-lg border-2 border-tg-bg">
+                   {userStats.level}
+                </div>
+                {userStats.badges.length > 0 && (
+                   <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-yellow-900 p-0.5 rounded-full border border-tg-bg">
+                      <Crown size={10} fill="currentColor" />
                    </div>
-                )}
-                
-                {user && (
-                  <div className="absolute -bottom-1 -right-1 bg-tg-bg rounded-full p-0.5">
-                    <div className="w-6 h-6 bg-gradient-to-tr from-yellow-400 to-orange-500 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm border border-tg-bg">
-                        {userStats.level}
-                    </div>
-                  </div>
                 )}
               </div>
-
-              {/* User Identity & Stats */}
-              <div className="flex-1 min-w-0">
-                 <h2 className="text-xl font-black text-tg-text truncate leading-tight mb-1 group-hover:text-tg-button transition-colors">
-                   {user ? user.first_name : 'Welcome, Explorer'}
-                 </h2>
-                 
-                 {user ? (
-                   <div className="flex items-center gap-2">
-                     <span className="text-xs font-bold text-tg-button uppercase tracking-wide">
-                       {levelInfo.title}
-                     </span>
-                     <div className="h-1.5 w-16 bg-tg-secondaryBg rounded-full overflow-hidden">
-                        <div className="h-full bg-tg-button rounded-full transition-all duration-500" style={{ width: `${nextLevelProgress}%` }}></div>
-                     </div>
-                   </div>
-                 ) : (
-                   <div className="flex items-center gap-1 text-sm text-tg-hint font-medium">
-                     <span>Tap to sign in</span>
-                     <ChevronRight size={14} />
-                   </div>
-                 )}
+              <div className="flex flex-col items-start">
+                 <span className="text-xs font-bold text-tg-text group-hover:text-tg-button transition-colors">{levelInfo.title}</span>
+                 <div className="w-24 h-1.5 bg-tg-secondaryBg rounded-full mt-1 overflow-hidden">
+                    <div className="h-full bg-tg-button rounded-full transition-all duration-500" style={{ width: `${nextLevelProgress}%` }}></div>
+                 </div>
               </div>
            </button>
+           
+           {/* User Profile / Login */}
+           {user ? (
+             <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-pointer hover:bg-tg-button/5 transition-colors backdrop-blur-md bg-opacity-80">
+               {user.photo_url ? (
+                 <img src={user.photo_url} alt="Profile" className="w-6 h-6 rounded-full ring-2 ring-white dark:ring-black" />
+               ) : (
+                 <div className="w-6 h-6 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold">
+                   {user.first_name[0]}
+                 </div>
+               )}
+               <span className="text-sm font-semibold text-tg-text truncate max-w-[100px]">{user.first_name}</span>
+             </button>
+           ) : (
+             <button 
+               onClick={handleLogin}
+               className="flex items-center gap-2 text-xs font-bold bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white px-3 py-1.5 rounded-full transition-all"
+             >
+               <UserIcon size={14} />
+               Sign In
+             </button>
+           )}
         </div>
 
         {/* Branding Header */}
