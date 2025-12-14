@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Telegram Mini App for Word Etymology",
   "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "dev:all": "node server.js & vite",
@@ -15,13 +18,13 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
-    "lucide-react": "^0.344.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "lucide-react": "^0.469.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
-    "@types/node": "^25.0.2",
+    "@types/node": "^20.11.24",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
     "@vitejs/plugin-react": "^4.2.1",
