@@ -1,4 +1,3 @@
-
 import type { UserStats, LevelInfo, Badge, BadgeId, LeaderboardEntry, TelegramUser } from '../types';
 
 // --- SHARED DEFINITIONS (Used by UI for rendering) ---
@@ -85,10 +84,6 @@ export const INITIAL_STATS: UserStats = {
 
 // --- API CLIENT ---
 
-// We now rely on the DatabaseService (via API) as the source of truth.
-// LocalStorage is only used for very basic offline caching to prevent UI flicker,
-// but logic prioritizes server data.
-
 export const fetchUserStats = async (user: TelegramUser): Promise<UserStats> => {
   try {
     // Pass name/photo so server can update user profile for leaderboard
@@ -136,15 +131,34 @@ export const trackAction = async (
     return { stats: result.stats, newBadges: newBadgeObjects };
   } catch (error) {
     console.error("Gamification update failed:", error);
-    // Optimistic UI update could go here, but for "Professional" data integrity, we return current known state
     const local = localStorage.getItem(`ety_stats_${userId}`);
     return { stats: local ? JSON.parse(local) : INITIAL_STATS, newBadges: [] };
   }
 };
 
-export const fetchLeaderboard = async (): Promise<LeaderboardEntry[]> => {
+export const fetchLeaderboard = async (user: TelegramUser | null, stats: UserStats): Promise<LeaderboardEntry[]> => {
   try {
-    const response = await fetch('/api/leaderboard');
+    // We send a POST request with the 'LEADERBOARD' action.
+    // We include the current user's data so the server can inject it into the response 
+    // if the server memory was reset (Serverless Cold Start).
+    
+    const body: any = {
+      action: 'LEADERBOARD',
+      // If user exists, send their details to ensure they appear on list
+      ...(user && {
+        userId: user.id,
+        name: user.first_name,
+        photo: user.photo_url || '',
+        stats: stats
+      })
+    };
+
+    const response = await fetch('/api/gamification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
     if (!response.ok) throw new Error('Failed to fetch leaderboard');
     return await response.json();
   } catch (error) {

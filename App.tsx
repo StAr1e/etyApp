@@ -450,7 +450,8 @@ export default function App() {
       {showLeaderboard && (
         <LeaderboardModal 
           onClose={() => setShowLeaderboard(false)} 
-          currentUserId={user?.id}
+          currentUser={user}
+          currentStats={userStats}
         />
       )}
     </div>

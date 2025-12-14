@@ -1,24 +1,26 @@
-
 import React, { useEffect, useState } from 'react';
-import { X, Trophy, Medal, User } from 'lucide-react';
-import { LeaderboardEntry } from '../types';
+import { X, Trophy, Medal } from 'lucide-react';
+import { LeaderboardEntry, TelegramUser, UserStats } from '../types';
 import { fetchLeaderboard } from '../services/gamification';
 
 interface LeaderboardModalProps {
   onClose: () => void;
-  currentUserId?: number;
+  currentUser: TelegramUser | null;
+  currentStats: UserStats;
 }
 
-export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose, currentUserId }) => {
+export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose, currentUser, currentStats }) => {
   const [leaders, setLeaders] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchLeaderboard().then(data => {
+    // We pass current user data to ensure they are represented in the leaderboard 
+    // even if the server is stateless (serverless cold start).
+    fetchLeaderboard(currentUser, currentStats).then(data => {
       setLeaders(data);
       setLoading(false);
     });
-  }, []);
+  }, [currentUser, currentStats]);
 
   const getRankIcon = (rank: number) => {
     if (rank === 1) return <Trophy size={20} className="text-yellow-500 fill-yellow-500" />;
@@ -67,7 +69,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose, cur
              leaders.map((user) => (
                <div 
                  key={user.userId} 
-                 className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${getRankStyle(user.rank)} ${user.userId === currentUserId ? 'ring-2 ring-tg-button' : ''}`}
+                 className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${getRankStyle(user.rank)} ${user.userId === currentUser?.id ? 'ring-2 ring-tg-button' : ''}`}
                >
                  <div className="w-8 flex items-center justify-center shrink-0">
                     {getRankIcon(user.rank)}
@@ -89,7 +91,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose, cur
                  <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-tg-text truncate">
                       {user.name} 
-                      {user.userId === currentUserId && <span className="ml-2 text-[10px] bg-tg-button text-white px-1.5 py-0.5 rounded-full align-middle">YOU</span>}
+                      {user.userId === currentUser?.id && <span className="ml-2 text-[10px] bg-tg-button text-white px-1.5 py-0.5 rounded-full align-middle">YOU</span>}
                     </h3>
                     <p className="text-xs text-tg-hint">Level {user.level}</p>
                  </div>
@@ -100,6 +102,13 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ onClose, cur
                  </div>
                </div>
              ))
+           )}
+           
+           {!loading && leaders.length === 0 && (
+              <div className="text-center py-10 text-tg-hint">
+                 <p>No explorers found yet.</p>
+                 <p className="text-xs mt-1">Be the first to search!</p>
+              </div>
            )}
         </div>
       </div>

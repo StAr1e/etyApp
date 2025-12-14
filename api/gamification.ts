@@ -1,4 +1,3 @@
-
 // This handler simulates a database connection for Vercel Serverless environment.
 // In a real scenario, this would connect to MongoDB/Postgres.
 
@@ -25,28 +24,6 @@ const INITIAL_STATS = {
 
 export default async function handler(request: any, response: any) {
   try {
-    // LEADERBOARD ENDPOINT
-    if (request.url?.includes('leaderboard')) {
-       // Convert map to array for leaderboard
-       const users = Array.from(memDb.values());
-       
-       // Sort and format
-       const leaderboard = users
-        .sort((a, b) => b.stats.xp - a.stats.xp)
-        .slice(0, 50)
-        .map((u, index) => ({
-            userId: u.userId,
-            name: u.profile.name,
-            photoUrl: u.profile.photo,
-            xp: u.stats.xp,
-            level: u.stats.level,
-            rank: index + 1,
-            badges: u.stats.badges.length
-        }));
-
-       return response.status(200).json(leaderboard);
-    }
-
     if (request.method === 'GET') {
       const { userId, name, photo } = request.query;
       if (!userId) return response.status(400).json({ error: "userId required" });
@@ -89,12 +66,51 @@ export default async function handler(request: any, response: any) {
     }
 
     if (request.method === 'POST') {
-      const { userId, action } = request.body;
-      if (!userId || !action) return response.status(400).json({ error: "Missing data" });
+      const { userId, action, name, photo, stats: syncedStats } = request.body;
+      
+      if (!action) return response.status(400).json({ error: "Missing action" });
+
+      // --- ACTION: LEADERBOARD ---
+      // This is a special action that merges the requesting user into the DB
+      // before returning the list, ensuring the user always sees themselves.
+      if (action === 'LEADERBOARD') {
+        if (userId && syncedStats) {
+           const idStr = userId.toString();
+           let existing = memDb.get(idStr);
+           
+           // If user missing from memory, or client has newer stats (syncedStats.xp > existing), update/insert
+           if (!existing || (syncedStats.xp > (existing.stats?.xp || 0))) {
+              memDb.set(idStr, {
+                 userId,
+                 profile: { name: name || 'Explorer', photo: photo || '' },
+                 stats: syncedStats
+              });
+           }
+        }
+        
+        // Generate List
+        const users = Array.from(memDb.values());
+        const leaderboard = users
+          .sort((a, b) => (b.stats?.xp || 0) - (a.stats?.xp || 0))
+          .slice(0, 50)
+          .map((u, index) => ({
+              userId: u.userId,
+              name: u.profile?.name || 'Explorer',
+              photoUrl: u.profile?.photo || '',
+              xp: u.stats?.xp || 0,
+              level: u.stats?.level || 1,
+              rank: index + 1,
+              badges: u.stats?.badges?.length || 0
+          }));
+
+        return response.status(200).json(leaderboard);
+      }
+
+      // --- STANDARD ACTIONS ---
+      if (!userId) return response.status(400).json({ error: "userId required" });
 
       let userData = memDb.get(userId.toString());
       if (!userData) {
-          // If action happens before GET (rare), init default
           userData = { userId, profile: { name: 'Unknown', photo: '' }, stats: { ...INITIAL_STATS } };
       }
 

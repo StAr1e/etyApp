@@ -1,4 +1,3 @@
-
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -16,11 +15,7 @@ const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.GEMINI_API_KEY;
 
 // --- DATABASE IMPLEMENTATION (File-Based for Persistence) ---
-// In a production environment like Heroku/Render/VPS, this file persists.
-// For Vercel, you would replace this section with MongoDB or Postgres connection.
 const DB_FILE = path.join(__dirname, 'gamification.db.json');
-
-// DB Structure: { "userId": { stats: {...}, profile: { name, photo } } }
 let db = {};
 
 const loadDb = () => {
@@ -150,41 +145,25 @@ app.get('/api/tts', async (req, res) => {
     }
 });
 
-// --- GAMIFICATION ENDPOINTS (PROPER DB) ---
-
+// --- GAMIFICATION ENDPOINTS ---
 const XP_ACTIONS = { SEARCH: 15, SUMMARY: 30, SHARE: 50, DAILY_VISIT: 100 };
+const INITIAL_STATS = { xp: 0, level: 1, wordsDiscovered: 0, summariesGenerated: 0, shares: 0, lastVisit: 0, currentStreak: 1, badges: [] };
 
-const INITIAL_STATS = {
-  xp: 0,
-  level: 1,
-  wordsDiscovered: 0,
-  summariesGenerated: 0,
-  shares: 0,
-  lastVisit: 0,
-  currentStreak: 1,
-  badges: []
-};
-
-// 1. Get User Stats
 app.get('/api/gamification', (req, res) => {
     const { userId, name, photo } = req.query;
     if (!userId) return res.status(400).json({ error: "userId required" });
 
     const idStr = userId.toString();
     
-    // Initialize or Retrieve
     let userData = db[idStr] || { 
         stats: { ...INITIAL_STATS, lastVisit: Date.now() },
         profile: { name: name || 'Explorer', photo: photo || '' }
     };
 
-    // Update Profile Info if provided (Syncing latest Telegram data)
     if (name) userData.profile.name = name;
     if (photo) userData.profile.photo = photo;
 
     let stats = userData.stats;
-
-    // Daily Streak Check
     const last = new Date(stats.lastVisit);
     const now = new Date();
     const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
@@ -203,7 +182,6 @@ app.get('/api/gamification', (req, res) => {
         stats.lastVisit = Date.now();
     }
 
-    // Save state back to DB
     userData.stats = stats;
     db[idStr] = userData;
     saveDb();
@@ -211,27 +189,62 @@ app.get('/api/gamification', (req, res) => {
     res.json(stats);
 });
 
-// 2. Track Action
 app.post('/api/gamification', (req, res) => {
-    const { userId, action } = req.body;
-    if (!userId || !action) return res.status(400).json({ error: "Missing data" });
+    const { userId, action, name, photo, stats: syncedStats } = req.body;
+    
+    if (!action) return res.status(400).json({ error: "Missing action" });
 
+    if (action === 'LEADERBOARD') {
+        if (userId && syncedStats) {
+             const idStr = userId.toString();
+             let existing = db[idStr];
+             // Ensure user exists or update if local stats are better
+             if (!existing || (syncedStats.xp > (existing.stats?.xp || 0))) {
+                 db[idStr] = {
+                     stats: syncedStats,
+                     profile: { name: name || 'Explorer', photo: photo || '' }
+                 };
+                 saveDb();
+             }
+        }
+        
+        const users = Object.keys(db).map(key => ({
+            userId: key,
+            ...db[key].profile,
+            ...db[key].stats
+        }));
+
+        const leaderboard = users
+            .sort((a, b) => b.xp - a.xp)
+            .slice(0, 50)
+            .map((u, index) => ({
+                userId: u.userId,
+                name: u.name || 'Explorer',
+                photoUrl: u.photoUrl || '',
+                xp: u.xp,
+                level: u.level,
+                rank: index + 1,
+                badges: u.badges.length
+            }));
+        return res.json(leaderboard);
+    }
+
+    // Standard Actions
+    if (!userId) return res.status(400).json({ error: "userId required" });
     const idStr = userId.toString();
+
     let userData = db[idStr] || { stats: { ...INITIAL_STATS }, profile: { name: 'Unknown', photo: '' } };
     let stats = userData.stats;
     const newBadges = [];
     const previousLevel = stats.level;
 
-    // Update Stats
     stats.xp += (XP_ACTIONS[action] || 0);
     if (action === 'SEARCH') stats.wordsDiscovered++;
     if (action === 'SUMMARY') stats.summariesGenerated++;
     if (action === 'SHARE') stats.shares++;
 
-    // Calculate Level
     stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
 
-    // Check Badges
     const addBadge = (id, condition) => {
         if (condition && !stats.badges.includes(id)) {
             stats.badges.push(id);
@@ -246,38 +259,10 @@ app.post('/api/gamification', (req, res) => {
     addBadge('daily_streak_3', stats.currentStreak >= 3);
 
     stats.lastVisit = Date.now();
-    
-    // Save
     db[idStr] = userData;
     saveDb();
 
     res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });
-});
-
-// 3. Leaderboard Endpoint
-app.get('/api/leaderboard', (req, res) => {
-    // Convert DB object to Array
-    const users = Object.keys(db).map(key => ({
-        userId: key,
-        ...db[key].profile,
-        ...db[key].stats
-    }));
-
-    // Sort by XP Descending
-    const leaderboard = users
-        .sort((a, b) => b.xp - a.xp)
-        .slice(0, 50) // Top 50
-        .map((u, index) => ({
-            userId: u.userId,
-            name: u.profile?.name || 'Explorer',
-            photoUrl: u.profile?.photo || '',
-            xp: u.xp,
-            level: u.level,
-            rank: index + 1,
-            badges: u.badges.length
-        }));
-
-    res.json(leaderboard);
 });
 
 app.get('*', (req, res) => {
