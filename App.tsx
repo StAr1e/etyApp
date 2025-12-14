@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
 import { WordData, SearchHistoryItem, TelegramUser } from './types';
@@ -16,11 +16,13 @@ export default function App() {
   // Summary State
   const [summary, setSummary] = useState<string | null>(null);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
+  
+  // Ref to prevent double-fetching in React Strict Mode
+  const hasInitialized = useRef(false);
 
   // --- Handlers ---
 
   const handleLogin = () => {
-    // Only attempt to get real data from Telegram WebApp SDK
     if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
       setUser(window.Telegram.WebApp.initDataUnsafe.user);
     } else {
@@ -29,16 +31,12 @@ export default function App() {
   };
 
   const handleBack = useCallback(() => {
-     // Close modal first if open
      if (showSummaryModal) {
        setShowSummaryModal(false);
-       if (window.Telegram?.WebApp) {
-         window.Telegram.WebApp.MainButton.show(); // Show button again when closing modal
-       }
+       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.show();
        return;
      }
 
-     // Navigate back
      setView('home');
      setWordData(null);
      setSummary(null);
@@ -59,83 +57,13 @@ export default function App() {
       const text = await fetchWordSummary(wordData.word);
       setSummary(text);
       setShowSummaryModal(true);
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.MainButton.hide(); // Hide button while viewing modal
-      }
+      if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hide();
     } catch (e) {
       console.error(e);
     } finally {
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.MainButton.hideProgress();
-      }
+      if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
   }, [wordData]);
-
-  // --- Lifecycle & Telegram SDK ---
-
-  useEffect(() => {
-    // Initialize Telegram WebApp features
-    if (window.Telegram?.WebApp) {
-      const tg = window.Telegram.WebApp;
-      tg.expand();
-      tg.ready();
-
-      // Attempt auto-login
-      if (tg.initDataUnsafe?.user) {
-        setUser(tg.initDataUnsafe.user);
-      }
-
-      // Set Main Button Params
-      tg.MainButton.setParams({
-        text: '✨ AI DEEP DIVE',
-        color: tg.themeParams.button_color || '#2481cc',
-        text_color: tg.themeParams.button_text_color || '#ffffff'
-      });
-    }
-    
-    // Load history
-    const saved = localStorage.getItem('ety_history');
-    if (saved) {
-      setHistory(JSON.parse(saved));
-    }
-  }, []);
-
-  // Manage Native Buttons State (Back & Main)
-  useEffect(() => {
-    if (!window.Telegram?.WebApp) return;
-    const tg = window.Telegram.WebApp;
-
-    const onMainBtnClick = () => handleGenerateSummary();
-    const onBackBtnClick = () => handleBack();
-
-    if (view === 'result') {
-      // Show Back Button
-      tg.BackButton.show();
-      tg.BackButton.onClick(onBackBtnClick);
-
-      // Show Main Button (if not in modal)
-      if (!showSummaryModal) {
-        tg.MainButton.show();
-        tg.MainButton.onClick(onMainBtnClick);
-      } else {
-        tg.MainButton.hide();
-      }
-
-    } else {
-      // Home View
-      tg.BackButton.hide();
-      tg.MainButton.hide();
-      tg.BackButton.offClick(onBackBtnClick);
-      tg.MainButton.offClick(onMainBtnClick);
-    }
-
-    // Cleanup
-    return () => {
-      tg.MainButton.offClick(onMainBtnClick);
-      tg.BackButton.offClick(onBackBtnClick);
-    };
-  }, [view, showSummaryModal, handleGenerateSummary, handleBack]);
-
 
   const handleSearch = async (term: string) => {
     if (!term) return;
@@ -151,7 +79,6 @@ export default function App() {
       setWordData(data);
       setView('result');
       
-      // Update History
       const newHistory = [
         { word: data.word, timestamp: Date.now() },
         ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
@@ -162,7 +89,6 @@ export default function App() {
 
     } catch (err: any) {
       console.error(err);
-      // Ensure we display the real error message
       setError(err.message || "An unexpected error occurred.");
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
     } finally {
@@ -170,10 +96,85 @@ export default function App() {
     }
   };
 
+  // --- Lifecycle & Telegram SDK ---
+
+  useEffect(() => {
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
+    // 1. Initialize Telegram WebApp
+    if (window.Telegram?.WebApp) {
+      const tg = window.Telegram.WebApp;
+      tg.expand();
+      tg.ready();
+
+      if (tg.initDataUnsafe?.user) {
+        setUser(tg.initDataUnsafe.user);
+      }
+
+      tg.MainButton.setParams({
+        text: '✨ AI DEEP DIVE',
+        color: tg.themeParams.button_color || '#2481cc',
+        text_color: tg.themeParams.button_text_color || '#ffffff'
+      });
+    }
+    
+    // 2. Load History
+    const saved = localStorage.getItem('ety_history');
+    if (saved) {
+      setHistory(JSON.parse(saved));
+    }
+
+    // 3. Handle Deep Linking (Auto-search shared words)
+    // Check URL params first (standard web/inline button), then Telegram start_param
+    const params = new URLSearchParams(window.location.search);
+    const deepLinkWord = params.get('word') || 
+                         params.get('startapp') || 
+                         window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+
+    if (deepLinkWord) {
+      // Small delay to ensure UI is ready
+      setTimeout(() => handleSearch(deepLinkWord), 100);
+    }
+
+  }, []);
+
+  // Manage Native Buttons State
+  useEffect(() => {
+    if (!window.Telegram?.WebApp) return;
+    const tg = window.Telegram.WebApp;
+
+    const onMainBtnClick = () => handleGenerateSummary();
+    const onBackBtnClick = () => handleBack();
+
+    if (view === 'result') {
+      tg.BackButton.show();
+      tg.BackButton.onClick(onBackBtnClick);
+
+      if (!showSummaryModal) {
+        tg.MainButton.show();
+        tg.MainButton.onClick(onMainBtnClick);
+      } else {
+        tg.MainButton.hide();
+      }
+
+    } else {
+      tg.BackButton.hide();
+      tg.MainButton.hide();
+      tg.BackButton.offClick(onBackBtnClick);
+      tg.MainButton.offClick(onMainBtnClick);
+    }
+
+    return () => {
+      tg.MainButton.offClick(onMainBtnClick);
+      tg.BackButton.offClick(onBackBtnClick);
+    };
+  }, [view, showSummaryModal, handleGenerateSummary, handleBack]);
+
   return (
     <div className="min-h-screen bg-tg-bg text-tg-text font-sans p-4 md:p-8 relative overflow-x-hidden">
       
-      {/* Content Container - Centered and max-width restricted for readability on desktop */}
+      {/* Content Container */}
       <div className="w-full max-w-md md:max-w-2xl mx-auto relative">
         
         {/* Top Bar / Login Area */}
@@ -251,7 +252,6 @@ export default function App() {
           {/* Results View */}
           {view === 'result' && wordData && !isLoading && (
              <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-500">
-                {/* Fallback back button for web users */}
                 {!window.Telegram?.WebApp && (
                   <button 
                     onClick={handleBack}
@@ -263,7 +263,6 @@ export default function App() {
                 
                 <WordCard data={wordData} />
                 
-                {/* Web-only fallback for Summary button if not in Telegram */}
                 {!window.Telegram?.WebApp && (
                    <button 
                      onClick={handleGenerateSummary}
@@ -276,7 +275,7 @@ export default function App() {
              </div>
           )}
 
-          {/* Empty State / Suggestions (Only on Home) */}
+          {/* Empty State */}
           {view === 'home' && !isLoading && !error && history.length === 0 && (
              <div className="mt-12 text-center">
                 <p className="text-tg-hint mb-4">Try searching for:</p>
@@ -296,12 +295,10 @@ export default function App() {
         </main>
       </div>
 
-      {/* Summary Modal (Bottom Sheet on Mobile, Centered Modal on Web) */}
+      {/* Summary Modal */}
       {showSummaryModal && summary && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200 p-4 md:p-0">
-           {/* Backdrop click to close */}
            <div className="absolute inset-0" onClick={() => setShowSummaryModal(false)}></div>
-           
            <div 
              className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-3xl md:rounded-2xl p-6 shadow-2xl animate-in slide-in-from-bottom md:zoom-in-95 duration-300 relative border-t md:border border-tg-hint/20"
              style={{ maxHeight: '85vh', overflowY: 'auto' }}
@@ -331,7 +328,6 @@ export default function App() {
            </div>
         </div>
       )}
-      
     </div>
   );
 }

@@ -2,7 +2,11 @@ import { Telegraf, Markup } from 'telegraf';
 
 // Initialize Bot
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
-const APP_URL = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : (process.env.HOSTING_URL || 'https://ety.ai');
+
+// Determine the base URL (handle Vercel environment automatically)
+const APP_URL = process.env.VERCEL_URL 
+  ? `https://${process.env.VERCEL_URL}` 
+  : (process.env.HOSTING_URL || 'https://ety.ai');
 
 // 1. /start command
 bot.command('start', (ctx) => {
@@ -34,7 +38,6 @@ bot.on('inline_query', async (ctx) => {
   }
 
   // Parse "Word: Definition" string from the Frontend
-  // We limit the definition length to avoid errors
   let title = query;
   let description = 'Ety.ai Word Result';
   let messageText = query;
@@ -48,6 +51,10 @@ bot.on('inline_query', async (ctx) => {
     messageText = `<b>${title.toUpperCase()}</b>\n\n${description}\n\n<i>🔗 Discovered via Ety.ai</i>`;
   }
 
+  // Construct Deep Link URL
+  // We append ?word=TERM so the web app knows what to load immediately
+  const deepLinkUrl = `${APP_URL}?word=${encodeURIComponent(title)}`;
+
   const results = [{
     type: 'article',
     id: String(Date.now()),
@@ -60,7 +67,7 @@ bot.on('inline_query', async (ctx) => {
     },
     reply_markup: {
       inline_keyboard: [[
-        Markup.button.webApp(`🔎 Explore "${title}"`, APP_URL)
+        Markup.button.webApp(`🔎 Explore "${title}"`, deepLinkUrl)
       ]]
     }
   }];
