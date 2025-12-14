@@ -1,9 +1,10 @@
-require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
-const http = require('http');
+import 'dotenv/config';
+import { Telegraf, Markup } from 'telegraf';
+import http from 'http';
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-const APP_URL = process.env.HOSTING_URL || '';
+// Use the Vercel link provided as default
+const APP_URL = process.env.HOSTING_URL || 'https://etyai-telegram-mini-app.vercel.app/';
 
 // 1. Handle /start command
 bot.command('start', (ctx) => {
@@ -75,7 +76,6 @@ console.log('Bot is polling...');
 bot.launch();
 
 // 4. Create a dummy HTTP server for Render Health Check
-// Render requires a web service to bind to a port within 60 seconds.
 const PORT = process.env.PORT || 8080;
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });

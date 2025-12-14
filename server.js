@@ -1,9 +1,13 @@
-require('dotenv').config();
-const express = require('express');
-const path = require('path');
-const cors = require('cors');
-const { Telegraf, Markup } = require('telegraf');
-const { GoogleGenAI, SchemaType, Type } = require('@google/genai');
+import 'dotenv/config';
+import express from 'express';
+import path from 'path';
+import cors from 'cors';
+import { Telegraf, Markup } from 'telegraf';
+import { GoogleGenAI } from '@google/genai';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -79,7 +83,7 @@ app.get('/api/details', async (req, res) => {
 
     const prompt = `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details. If the word is misspelled, analyze the closest correct word.`;
     
-    // Manual Schema definition for CommonJS
+    // Manual Schema definition for consistency
     const schema = {
         type: "OBJECT",
         properties: {
@@ -168,7 +172,7 @@ app.get('/api/tts', async (req, res) => {
     }
 });
 
-// Handle React Routing (for any path not captured above, serve index.html)
+// Handle React Routing
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

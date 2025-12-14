@@ -2,6 +2,7 @@
   "name": "ety-ai-miniapp",
   "version": "1.0.0",
   "description": "Telegram Mini App for Word Etymology",
+  "type": "module",
   "main": "server.js",
   "engines": {
     "node": ">=18.0.0"
