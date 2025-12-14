@@ -3,7 +3,7 @@ import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
 import { WordData, SearchHistoryItem, TelegramUser } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Command } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -125,15 +125,13 @@ export default function App() {
       setHistory(JSON.parse(saved));
     }
 
-    // 3. Handle Deep Linking (Auto-search shared words)
-    // Check URL params first (standard web/inline button), then Telegram start_param
+    // 3. Handle Deep Linking
     const params = new URLSearchParams(window.location.search);
     const deepLinkWord = params.get('word') || 
                          params.get('startapp') || 
                          window.Telegram?.WebApp?.initDataUnsafe?.start_param;
 
     if (deepLinkWord) {
-      // Small delay to ensure UI is ready
       setTimeout(() => handleSearch(deepLinkWord), 100);
     }
 
@@ -174,21 +172,28 @@ export default function App() {
   const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
 
   return (
-    <div className="min-h-screen bg-tg-bg text-tg-text font-sans p-4 md:p-8 relative overflow-x-hidden">
+    <div className="min-h-screen bg-tg-bg text-tg-text font-sans relative overflow-x-hidden selection:bg-tg-button selection:text-white">
       
+      {/* Ambient Background Glow (Theme Aware) */}
+      <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[50%] bg-tg-button rounded-full blur-[120px] opacity-[0.08] pointer-events-none z-0"></div>
+      <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-500 rounded-full blur-[100px] opacity-[0.05] pointer-events-none z-0"></div>
+
       {/* Content Container */}
-      <div className="w-full max-w-md md:max-w-2xl mx-auto relative">
+      <div className="w-full max-w-2xl mx-auto relative z-10 min-h-screen flex flex-col p-4 md:p-6">
         
         {/* Top Bar / Login Area */}
-        <div className={`absolute top-0 left-0 right-0 flex justify-between items-center z-20 transition-opacity ${view === 'result' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider"></div>
+        <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
+           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider flex items-center gap-1">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+              Online
+           </div>
            
            {user ? (
-             <div className="flex items-center gap-2 bg-tg-secondaryBg pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-default">
+             <div className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-default backdrop-blur-md bg-opacity-80">
                {user.photo_url ? (
-                 <img src={user.photo_url} alt="Profile" className="w-6 h-6 rounded-full" />
+                 <img src={user.photo_url} alt="Profile" className="w-6 h-6 rounded-full ring-2 ring-white dark:ring-black" />
                ) : (
-                 <div className="w-6 h-6 bg-gradient-to-br from-purple-400 to-blue-500 rounded-full flex items-center justify-center text-white text-xs font-bold">
+                 <div className="w-6 h-6 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold">
                    {user.first_name[0]}
                  </div>
                )}
@@ -197,68 +202,77 @@ export default function App() {
            ) : (
              <button 
                onClick={handleLogin}
-               className="flex items-center gap-2 text-sm font-bold text-tg-button hover:bg-tg-button/10 px-3 py-1.5 rounded-full transition-colors"
+               className="flex items-center gap-2 text-xs font-bold bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white px-3 py-1.5 rounded-full transition-all"
              >
-               <UserIcon size={16} />
-               Login
+               <UserIcon size={14} />
+               Sign In
              </button>
            )}
         </div>
 
         {/* Branding Header */}
-        <header className={`flex items-center justify-center py-6 mt-8 md:mt-12 transition-all duration-500 ${view === 'result' ? 'opacity-0 h-0 overflow-hidden py-0 mt-0' : 'opacity-100'}`}>
+        <header className={`flex flex-col items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${view === 'result' ? 'h-0 overflow-hidden opacity-0 scale-95' : 'flex-1 max-h-[40vh] opacity-100 scale-100'}`}>
           <div className="text-center">
-             <img 
-               src="/logo.png" 
-               alt="Ety.ai" 
-               className="w-24 h-24 mx-auto mb-4 object-contain animate-in fade-in zoom-in duration-500" 
-               onError={(e) => {
-                 // Fallback if image fails
-                 e.currentTarget.style.display = 'none';
-                 e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden');
-               }}
-             />
-             <div className="fallback-logo hidden w-16 h-16 bg-gradient-to-tr from-tg-button to-purple-500 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-lg text-white">
-               <span className="font-serif font-bold text-3xl">Æ</span>
+             <div className="relative inline-block">
+               <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-20 rounded-full"></div>
+               <img 
+                 src="/logo.png" 
+                 alt="Ety.ai" 
+                 className="relative z-10 w-28 h-28 mx-auto mb-6 object-contain animate-float drop-shadow-xl" 
+                 onError={(e) => {
+                   e.currentTarget.style.display = 'none';
+                   e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden');
+                 }}
+               />
+               <div className="fallback-logo hidden w-20 h-20 bg-gradient-to-br from-tg-button to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-tg-button/30 text-white rotate-3 hover:rotate-6 transition-transform">
+                 <span className="font-serif font-black text-4xl">Æ</span>
+               </div>
              </div>
-             <h1 className="text-2xl font-bold tracking-tight">Ety.ai</h1>
-             <p className="text-tg-hint text-sm">Discover the stories behind words</p>
+             <h1 className="text-3xl md:text-4xl font-black tracking-tight text-tg-text mb-2">Ety.ai</h1>
+             <p className="text-tg-hint font-medium text-base">Uncover the stories behind words</p>
           </div>
         </header>
 
         {/* Main Search Area */}
-        <main className="relative z-10 pb-20 md:pb-0">
-          <SearchBar 
-            onSearch={handleSearch} 
-            isLoading={isLoading} 
-            history={history}
-            onHistorySelect={(term) => handleSearch(term)}
-          />
+        <main className={`relative z-10 transition-all duration-500 ${view === 'result' ? 'mt-4' : 'mt-8'}`}>
+          
+          <div className={`${view === 'result' ? '' : 'max-w-md mx-auto'}`}>
+            <SearchBar 
+              onSearch={handleSearch} 
+              isLoading={isLoading} 
+              history={history}
+              onHistorySelect={(term) => handleSearch(term)}
+            />
+          </div>
 
           {/* Loading State */}
           {isLoading && (
-            <div className="mt-8 text-center animate-pulse">
-              <div className="w-16 h-16 mx-auto bg-tg-secondaryBg rounded-full mb-4 flex items-center justify-center">
-                 <Sparkles className="text-tg-button animate-spin-slow" />
+            <div className="mt-12 text-center animate-in fade-in zoom-in duration-300">
+              <div className="w-16 h-16 mx-auto bg-tg-secondaryBg rounded-full mb-4 flex items-center justify-center relative">
+                 <div className="absolute inset-0 border-4 border-tg-button/20 rounded-full"></div>
+                 <div className="absolute inset-0 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
+                 <Sparkles className="text-tg-button" size={24} />
               </div>
-              <p className="text-tg-hint font-medium">Consulting the archives...</p>
+              <p className="text-tg-text font-serif italic text-lg animate-pulse">Consulting the archives...</p>
             </div>
           )}
 
           {/* Error State */}
           {error && (
-            <div className={`mt-6 p-4 rounded-xl flex items-start gap-3 border ${
+            <div className={`mt-6 mx-auto max-w-md p-5 rounded-2xl flex items-start gap-4 shadow-sm border animate-in slide-in-from-bottom-2 ${
                 isQuotaError 
-                 ? "bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-800/30" 
-                 : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800/30"
+                 ? "bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-100 border-amber-200 dark:border-amber-800/30" 
+                 : "bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-200 border-red-200 dark:border-red-800/30"
             }`}>
-              {isQuotaError ? <CloudOff className="shrink-0 mt-0.5" size={20} /> : <AlertTriangle className="shrink-0 mt-0.5" size={20} />}
+              <div className={`p-2 rounded-full shrink-0 ${isQuotaError ? 'bg-amber-100 dark:bg-amber-800' : 'bg-red-100 dark:bg-red-800'}`}>
+                {isQuotaError ? <CloudOff size={20} /> : <AlertTriangle size={20} />}
+              </div>
               <div>
-                 <p className="font-bold text-sm mb-1">{isQuotaError ? "Daily Limit Reached" : "Connection Error"}</p>
+                 <p className="font-bold text-base mb-1">{isQuotaError ? "Daily Limit Reached" : "Connection Error"}</p>
                  <p className="text-sm opacity-90 leading-relaxed">{error}</p>
                  {!isQuotaError && error.includes("API Key missing") && (
-                   <p className="text-xs mt-2 font-mono bg-black/10 p-2 rounded">
-                     Fix: Add GEMINI_API_KEY to Vercel Environment Variables.
+                   <p className="text-xs mt-3 font-mono bg-black/5 dark:bg-white/5 p-2 rounded border border-black/5">
+                     ENV: GEMINI_API_KEY missing
                    </p>
                  )}
               </div>
@@ -267,13 +281,13 @@ export default function App() {
 
           {/* Results View */}
           {view === 'result' && wordData && !isLoading && (
-             <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-500">
+             <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
                 {!window.Telegram?.WebApp && (
                   <button 
                     onClick={handleBack}
-                    className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-1 text-sm font-medium transition-colors"
+                    className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"
                   >
-                    &larr; Search another word
+                    <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Search
                   </button>
                 )}
                 
@@ -282,25 +296,29 @@ export default function App() {
                 {!window.Telegram?.WebApp && (
                    <button 
                      onClick={handleGenerateSummary}
-                     className="w-full py-4 mt-4 bg-gradient-to-r from-tg-button to-purple-600 text-white rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+                     className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"
                    >
-                     <Wand2 size={20} />
-                     Generate AI Deep Dive
+                     <Wand2 size={22} />
+                     Generate Deep Dive
                    </button>
                 )}
              </div>
           )}
 
-          {/* Empty State */}
-          {view === 'home' && !isLoading && !error && history.length === 0 && (
-             <div className="mt-12 text-center">
-                <p className="text-tg-hint mb-4">Try searching for:</p>
-                <div className="flex flex-wrap justify-center gap-2">
-                   {['Serendipity', 'Robot', 'Galaxy', 'Whiskey'].map(w => (
+          {/* Empty State / Suggestions */}
+          {view === 'home' && !isLoading && !error && (
+             <div className="mt-16 text-center animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
+                <p className="text-tg-hint text-sm font-semibold uppercase tracking-wider mb-6 flex items-center justify-center gap-2">
+                  <Command size={14} /> 
+                  Trending Words
+                </p>
+                <div className="flex flex-wrap justify-center gap-3">
+                   {['Serendipity', 'Petrichor', 'Labyrinth', 'Echo', 'Galaxy', 'Robot'].map((w, i) => (
                      <button 
                        key={w}
                        onClick={() => handleSearch(w)}
-                       className="px-4 py-2 bg-tg-secondaryBg rounded-full text-tg-text text-sm font-medium hover:bg-tg-button/10 hover:text-tg-button transition-colors"
+                       style={{ animationDelay: `${i * 50}ms` }}
+                       className="px-5 py-2.5 bg-tg-secondaryBg border border-tg-hint/10 rounded-xl text-tg-text font-medium hover:border-tg-button hover:text-tg-button hover:bg-tg-button/5 hover:shadow-md transition-all animate-in zoom-in"
                      >
                        {w}
                      </button>
@@ -313,34 +331,39 @@ export default function App() {
 
       {/* Summary Modal */}
       {showSummaryModal && summary && (
-        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200 p-4 md:p-0">
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-md animate-in fade-in duration-300 p-0 md:p-4">
            <div className="absolute inset-0" onClick={() => setShowSummaryModal(false)}></div>
            <div 
-             className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-3xl md:rounded-2xl p-6 shadow-2xl animate-in slide-in-from-bottom md:zoom-in-95 duration-300 relative border-t md:border border-tg-hint/20"
-             style={{ maxHeight: '85vh', overflowY: 'auto' }}
+             className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-[2rem] md:rounded-3xl p-8 shadow-2xl animate-in slide-in-from-bottom duration-300 relative border-t md:border border-white/20 dark:border-white/5 max-h-[85vh] overflow-y-auto no-scrollbar"
            >
+              <div className="w-12 h-1.5 bg-tg-hint/20 rounded-full mx-auto mb-6 md:hidden"></div>
+              
               <button 
                 onClick={() => setShowSummaryModal(false)}
-                className="absolute top-4 right-4 p-2 bg-tg-secondaryBg rounded-full text-tg-hint hover:text-tg-text transition-colors"
+                className="absolute top-6 right-6 p-2 bg-tg-secondaryBg rounded-full text-tg-hint hover:text-tg-text transition-colors hover:rotate-90 duration-300"
               >
                 <X size={20} />
               </button>
               
-              <div className="flex items-center gap-2 mb-4 text-purple-600">
-                 <Wand2 size={24} />
-                 <h2 className="text-2xl font-bold font-serif">Deep Dive</h2>
+              <div className="flex items-center gap-3 mb-6 text-tg-button">
+                 <div className="p-2.5 bg-tg-button/10 rounded-xl">
+                    <Wand2 size={24} />
+                 </div>
+                 <h2 className="text-2xl font-bold font-serif text-tg-text">Deep Dive</h2>
               </div>
               
-              <div className="prose prose-lg dark:prose-invert text-tg-text leading-relaxed font-serif">
+              <div className="prose prose-lg dark:prose-invert text-tg-text/90 leading-relaxed font-serif first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px] first-letter:text-tg-button">
                 <p>{summary}</p>
               </div>
 
-              <button 
-                onClick={() => setShowSummaryModal(false)}
-                className="w-full mt-8 py-3 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-secondaryBg/80 transition-colors"
-              >
-                Close
-              </button>
+              <div className="mt-8 pt-6 border-t border-tg-hint/10">
+                <button 
+                  onClick={() => setShowSummaryModal(false)}
+                  className="w-full py-3.5 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-hint/10 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
            </div>
         </div>
       )}
