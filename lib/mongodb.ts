@@ -1,12 +1,6 @@
-import mongoose from 'mongoose';
+import mongoose, { Model } from 'mongoose';
 
 const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  // In development/build, this might not be set. 
-  // We allow the code to proceed so it doesn't crash builds, 
-  // but runtime functions will need to handle the missing URI.
-}
 
 // Global cached connection for Serverless re-use
 let cached = (global as any).mongoose;
@@ -31,6 +25,7 @@ export async function connectToDatabase() {
     };
 
     cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+      console.log("MongoDB connected via Mongoose");
       return mongoose;
     });
   }
@@ -47,8 +42,26 @@ export async function connectToDatabase() {
 
 // --- SCHEMA DEFINITION ---
 
-const UserSchema = new mongoose.Schema({
-  userId: { type: String, required: true, unique: true, index: true }, // Store as String to prevent BigInt issues
+export interface IUser {
+  userId: string;
+  profile: {
+    name: string;
+    photo: string;
+  };
+  stats: {
+    xp: number;
+    level: number;
+    wordsDiscovered: number;
+    summariesGenerated: number;
+    shares: number;
+    lastVisit: number;
+    currentStreak: number;
+    badges: string[];
+  };
+}
+
+const UserSchema = new mongoose.Schema<IUser>({
+  userId: { type: String, required: true, unique: true, index: true }, 
   profile: {
     name: { type: String, default: 'Explorer' },
     photo: { type: String, default: '' }
@@ -63,7 +76,11 @@ const UserSchema = new mongoose.Schema({
     currentStreak: { type: Number, default: 1 },
     badges: { type: [String], default: [] }
   }
-}, { timestamps: true });
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
 
 // Prevent compiling model multiple times in HMR/Serverless
-export const User = mongoose.models.User || mongoose.model('User', UserSchema);
+export const User = (mongoose.models.User || mongoose.model<IUser>('User', UserSchema)) as Model<IUser>;

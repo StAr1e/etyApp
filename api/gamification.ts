@@ -72,8 +72,6 @@ export default async function handler(request: any, response: any) {
     const db = await connectToDatabase();
     
     if (!db) {
-       // Fallback for when DB isn't configured - mostly for avoiding crashes, 
-       // but stats won't persist across restarts.
        return response.status(503).json({ error: "Database not configured (MONGODB_URI missing)" });
     }
 
@@ -102,6 +100,8 @@ export default async function handler(request: any, response: any) {
       // Check Streak
       const streakXp = updateStreak(user.stats);
       if (streakXp > 0 || name || photo) {
+        // Mongoose detects changes in subdocs automatically, but explicit save ensures it
+        user.markModified('stats'); 
         await user.save();
       }
 
@@ -125,7 +125,7 @@ export default async function handler(request: any, response: any) {
                  'profile.name': name || 'Explorer',
                  'profile.photo': photo || '' 
               },
-              // If client has better XP (rare sync issue), take it, otherwise ignore
+              // If client has better XP (rare sync issue), take it
               ...(syncedStats ? { 
                  $max: { 'stats.xp': syncedStats.xp } 
               } : {})
@@ -185,7 +185,7 @@ export default async function handler(request: any, response: any) {
       
       stats.lastVisit = Date.now();
       
-      // Save
+      user.markModified('stats');
       await user.save();
 
       return response.status(200).json({
