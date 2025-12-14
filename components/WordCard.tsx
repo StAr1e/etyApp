@@ -49,19 +49,28 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
       
       // Truncate definition to ensure it fits nicely in the inline query box
-      // Telegram has limits on query length
       const shortDef = data.definition.length > 150 
         ? data.definition.substring(0, 147) + '...' 
         : data.definition;
 
-      // Format: "Word: Definition"
-      // The bot parses this specific format in api/bot.ts
+      // Format: "Word: Definition" matches bot logic
       const text = `${data.word}: ${shortDef}`;
       
-      const types = target === 'groups' ? ['groups', 'supergroups'] : ['users', 'groups', 'channels'];
+      // FIX: 'supergroups' is often not a valid distinct type in some TG versions.
+      // Use standard types: users, groups, channels.
+      // If targeting groups, include 'groups' and 'users' (for multi-user chats) just in case.
+      const types = target === 'groups' 
+        ? ['groups', 'users'] 
+        : ['users', 'groups', 'channels'];
       
       // Open the chat selection with the query pre-filled
-      window.Telegram.WebApp.switchInlineQuery(text, types);
+      try {
+        window.Telegram.WebApp.switchInlineQuery(text, types);
+      } catch (e) {
+        console.error("Share failed", e);
+        // Fallback to basic switch if types fail
+        window.Telegram.WebApp.switchInlineQuery(text);
+      }
     } else {
        // Fallback for web
        const shareData: any = {
@@ -69,7 +78,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
            text: `${data.word}\n${data.definition}\n\nOrigin: ${data.etymology}`,
        };
        
-       // Only attach URL if it's a valid http/https protocol
        if (window.location.protocol.startsWith('http')) {
            shareData.url = window.location.href;
        }

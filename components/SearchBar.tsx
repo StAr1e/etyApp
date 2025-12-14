@@ -24,26 +24,13 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
   };
 
   return (
-    <div className={`
-      transition-all duration-300 z-50
-      ${isFocused 
-        ? 'fixed inset-0 p-4 bg-tg-bg md:relative md:inset-auto md:p-0 md:bg-transparent' 
-        : 'relative z-20'
-      }
-    `}>
-      {/* Invisible backdrop for desktop to catch clicks outside */}
-      {isFocused && (
-        <div 
-          className="hidden md:block fixed inset-0 z-[-1]" 
-          onClick={() => setIsFocused(false)}
-        />
-      )}
-
+    <div className="relative z-50">
+      {/* Search Input Container */}
       <form onSubmit={handleSubmit} className="relative z-10">
         <div className={`
           flex items-center gap-2 bg-tg-secondaryBg rounded-xl px-4 py-3 
           border-2 transition-colors 
-          ${isFocused ? 'border-tg-button shadow-lg' : 'border-transparent'}
+          ${isFocused ? 'border-tg-button shadow-md' : 'border-transparent'}
         `}>
           <Search size={20} className="text-tg-hint shrink-0" />
           <input
@@ -52,6 +39,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setIsFocused(true)}
+            // Delay blur to allow click on history items
+            onBlur={() => setTimeout(() => setIsFocused(false), 200)}
             placeholder="Search etymology..."
             className="bg-transparent border-none outline-none w-full text-tg-text placeholder-tg-hint text-lg"
             autoComplete="off"
@@ -66,29 +55,15 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
               <X size={14} />
             </button>
           )}
-          {/* Cancel button: Visible on mobile focus only */}
-          <button 
-            type="button" 
-            onClick={() => setIsFocused(false)}
-            className={`
-              text-sm text-tg-button font-medium ml-2 whitespace-nowrap md:hidden
-              ${isFocused ? 'block' : 'hidden'}
-            `}
-          >
-            Cancel
-          </button>
         </div>
       </form>
 
       {/* Dropdown Suggestions / History */}
-      {isFocused && (
-        <div className={`
-          mt-6 animate-in fade-in slide-in-from-bottom-2
-          md:absolute md:top-full md:left-0 md:right-0 md:mt-2 md:bg-tg-bg md:shadow-xl md:rounded-xl md:border md:border-tg-hint/10 md:p-2 md:max-h-[60vh] md:overflow-y-auto
-        `}>
+      {isFocused && (history.length > 0 || query) && (
+        <div className="absolute top-full left-0 right-0 mt-2 bg-tg-bg shadow-xl rounded-xl border border-tg-hint/10 p-2 max-h-[60vh] overflow-y-auto animate-in fade-in slide-in-from-top-2 z-20">
           {history.length > 0 && !query && (
             <div className="md:px-2">
-               <div className="flex items-center gap-2 text-tg-hint text-xs font-bold uppercase tracking-wider mb-3 md:mt-2">
+               <div className="flex items-center gap-2 text-tg-hint text-xs font-bold uppercase tracking-wider mb-2 mt-2 px-2">
                  <Clock size={12} />
                  Recent
                </div>
@@ -96,7 +71,8 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
                  {history.map((item) => (
                    <button
                      key={item.timestamp}
-                     onClick={() => {
+                     onClick={(e) => {
+                       e.preventDefault(); // Prevent blur from firing before click
                        setQuery(item.word);
                        onHistorySelect(item.word);
                        setIsFocused(false);
@@ -114,7 +90,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
           {query && (
              <button
                onClick={handleSubmit}
-               className="w-full mt-2 p-4 bg-tg-button text-tg-buttonText rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+               className="w-full mt-2 p-3 bg-tg-button text-tg-buttonText rounded-xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
              >
                Search for "{query}"
                {isLoading && <span className="animate-spin">⏳</span>}

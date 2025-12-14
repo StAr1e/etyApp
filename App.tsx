@@ -179,7 +179,7 @@ export default function App() {
         
         {/* Top Bar / Login Area */}
         <div className={`absolute top-0 left-0 right-0 flex justify-between items-center z-20 transition-opacity ${view === 'result' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider">v1.2</div>
+           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider"></div>
            
            {user ? (
              <div className="flex items-center gap-2 bg-tg-secondaryBg pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-default">
@@ -206,7 +206,17 @@ export default function App() {
         {/* Branding Header */}
         <header className={`flex items-center justify-center py-6 mt-8 md:mt-12 transition-all duration-500 ${view === 'result' ? 'opacity-0 h-0 overflow-hidden py-0 mt-0' : 'opacity-100'}`}>
           <div className="text-center">
-             <div className="w-16 h-16 bg-gradient-to-tr from-tg-button to-purple-500 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-lg text-white">
+             <img 
+               src="/logo.png" 
+               alt="Ety.ai" 
+               className="w-24 h-24 mx-auto mb-4 object-contain animate-in fade-in zoom-in duration-500" 
+               onError={(e) => {
+                 // Fallback if image fails
+                 e.currentTarget.style.display = 'none';
+                 e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden');
+               }}
+             />
+             <div className="fallback-logo hidden w-16 h-16 bg-gradient-to-tr from-tg-button to-purple-500 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-lg text-white">
                <span className="font-serif font-bold text-3xl">Æ</span>
              </div>
              <h1 className="text-2xl font-bold tracking-tight">Ety.ai</h1>
