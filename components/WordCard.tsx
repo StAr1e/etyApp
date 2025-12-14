@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { WordData } from '../types';
-import { Play, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck } from 'lucide-react';
+import { Play, Share2, BookOpen, GitFork, Lightbulb, Copy, Check, Users } from 'lucide-react';
 import { fetchPronunciation } from '../services/geminiService';
 
 interface WordCardProps {
@@ -17,14 +17,18 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
     try {
       const audioBuffer = await fetchPronunciation(data.word);
       if (audioBuffer) {
+        // Gemini TTS returns raw PCM data at 24kHz
         const SAMPLE_RATE = 24000;
         const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        
+        // Convert raw PCM (Int16) to AudioBuffer (Float32)
         const dataInt16 = new Int16Array(audioBuffer);
         const buffer = audioContext.createBuffer(1, dataInt16.length, SAMPLE_RATE);
         const channelData = buffer.getChannelData(0);
         for (let i = 0; i < dataInt16.length; i++) {
           channelData[i] = dataInt16[i] / 32768.0;
         }
+
         const source = audioContext.createBufferSource();
         source.buffer = buffer;
         source.connect(audioContext.destination);
@@ -40,38 +44,41 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
   };
 
   const handleShare = (target: 'all' | 'groups') => {
+    // Check if running in Telegram
     if (window.Telegram?.WebApp) {
-      const tg = window.Telegram.WebApp;
-      tg.HapticFeedback.impactOccurred('medium');
-      const shortDef = data.definition.length > 100 
-        ? data.definition.substring(0, 97) + '...' 
-        : data.definition;
-      const text = `${data.word}: ${shortDef}`;
-      const types = target === 'groups' ? ['groups'] : ['users', 'groups', 'channels'];
+      window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
       
-      try {
-        tg.switchInlineQuery(text, types);
-      } catch (e) {
-        try {
-          tg.switchInlineQuery(text);
-        } catch (e2) {
-           const fallbackUrl = `https://t.me/share/url?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(text)}`;
-           // Prefer openTelegramLink for t.me links, fall back to openLink
-           if (tg.openTelegramLink) {
-             tg.openTelegramLink(fallbackUrl);
-           } else {
-             tg.openLink(fallbackUrl);
-           }
-        }
-      }
+      // Truncate definition to ensure it fits nicely in the inline query box
+      // Telegram has limits on query length
+      const shortDef = data.definition.length > 150 
+        ? data.definition.substring(0, 147) + '...' 
+        : data.definition;
+
+      // Format: "Word: Definition"
+      // The bot parses this specific format in api/bot.ts
+      const text = `${data.word}: ${shortDef}`;
+      
+      const types = target === 'groups' ? ['groups', 'supergroups'] : ['users', 'groups', 'channels'];
+      
+      // Open the chat selection with the query pre-filled
+      window.Telegram.WebApp.switchInlineQuery(text, types);
     } else {
+       // Fallback for web
        const shareData: any = {
            title: `Ety.ai: ${data.word}`,
            text: `${data.word}\n${data.definition}\n\nOrigin: ${data.etymology}`,
        };
-       if (window.location.protocol.startsWith('http')) shareData.url = window.location.href;
+       
+       // Only attach URL if it's a valid http/https protocol
+       if (window.location.protocol.startsWith('http')) {
+           shareData.url = window.location.href;
+       }
+
        if (navigator.share) {
-         navigator.share(shareData).catch(() => handleCopy());
+         navigator.share(shareData).catch((err) => {
+             console.warn("Share failed, falling back to copy:", err);
+             handleCopy();
+         });
        } else {
          handleCopy();
        }
@@ -87,162 +94,129 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
   };
 
   return (
-    <div className="pb-24 md:pb-8 space-y-6">
-      
-      {/* 1. Hero Card */}
-      <div className="bg-tg-bg rounded-3xl p-6 md:p-8 shadow-soft border border-tg-hint/10 relative overflow-hidden group">
-        {/* Subtle Background Texture */}
-        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-tg-button/5 to-transparent rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-24 md:pb-8">
+      {/* Header Card */}
+      <div className="bg-tg-secondaryBg rounded-2xl p-6 md:p-8 mb-6 shadow-sm relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+          <BookOpen size={120} />
+        </div>
         
         <div className="relative z-10">
-          <div className="flex justify-between items-start mb-4">
-             <span className="px-3 py-1 bg-tg-secondaryBg text-tg-hint text-xs font-bold rounded-full uppercase tracking-wider border border-tg-hint/10">
+          <div className="flex justify-between items-start mb-2">
+             <span className="px-2 py-1 bg-tg-button/10 text-tg-button text-xs font-bold rounded uppercase tracking-wider">
                {data.partOfSpeech}
              </span>
              <div className="flex gap-2">
                 <button 
                   onClick={handleCopy}
-                  className="p-2.5 rounded-full bg-tg-secondaryBg text-tg-hint hover:text-tg-text hover:bg-tg-button/10 transition-colors"
-                  title="Copy"
+                  className="p-2 rounded-full hover:bg-black/5 active:scale-95 transition-transform"
+                  title="Copy to clipboard"
                 >
-                  {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
+                  {copied ? <Check size={20} className="text-green-600" /> : <Copy size={20} className="text-tg-hint" />}
                 </button>
                 <button 
                   onClick={() => handleShare('all')}
-                  className="p-2.5 rounded-full bg-tg-secondaryBg text-tg-hint hover:text-tg-button hover:bg-tg-button/10 transition-colors"
+                  className="p-2 rounded-full hover:bg-black/5 active:scale-95 transition-transform"
                   title="Share"
                 >
-                  <Share2 size={18} />
+                  <Share2 size={20} className="text-tg-button" />
                 </button>
              </div>
           </div>
 
-          <div className="flex flex-col gap-1 mb-6">
-            <h1 className="text-5xl md:text-6xl font-serif font-black text-tg-text tracking-tight capitalize bg-clip-text text-transparent bg-gradient-to-br from-tg-text to-tg-text/70 pb-2">
-              {data.word}
-            </h1>
-            <div className="flex items-center gap-4">
-              <span className="text-xl text-tg-hint font-mono tracking-wide">{data.phonetic}</span>
-              <button 
-                onClick={handlePlayAudio}
-                disabled={isPlaying}
-                className={`p-2 rounded-full bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white transition-all ${isPlaying ? 'animate-pulse' : 'hover:scale-110 active:scale-95'}`}
-              >
-                 {isPlaying ? <Volume2 size={20} /> : <Play size={20} fill="currentColor" />}
-              </button>
-            </div>
+          <h1 className="text-4xl md:text-5xl font-serif font-bold text-tg-text mb-2 capitalize tracking-tight">
+            {data.word}
+          </h1>
+          
+          <div className="flex items-center gap-3 mb-6">
+            <span className="text-lg md:text-xl text-tg-hint font-mono">{data.phonetic}</span>
+            <button 
+              onClick={handlePlayAudio}
+              disabled={isPlaying}
+              className={`p-2 rounded-full bg-tg-button text-tg-buttonText flex items-center justify-center transition-all ${isPlaying ? 'opacity-50' : 'hover:scale-110 active:scale-95'}`}
+            >
+               <Play size={16} fill="currentColor" />
+            </button>
           </div>
 
-          <div className="relative pl-6">
-            <div className="absolute left-0 top-1 bottom-1 w-1 bg-tg-button rounded-full opacity-30"></div>
-            <p className="text-xl md:text-2xl leading-relaxed text-tg-text font-serif">
-              {data.definition}
-            </p>
-          </div>
+          <p className="text-lg md:text-xl leading-relaxed text-tg-text/90 font-serif border-l-4 border-tg-button pl-4">
+            {data.definition}
+          </p>
         </div>
       </div>
 
-      {/* Share Action Block */}
+      {/* Share to Group Action */}
       <button 
         onClick={() => handleShare('groups')}
-        className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white p-4 rounded-2xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-3 transition-all active:scale-[0.98] group"
+        className="w-full mb-6 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white p-3 rounded-xl shadow-md flex items-center justify-center gap-2 transition-all active:scale-95"
       >
-        <div className="p-1.5 bg-white/20 rounded-full group-hover:rotate-12 transition-transform">
-          <Users size={20} />
-        </div>
-        <span className="font-bold text-lg">Share to Chat</span>
+        <Users size={18} />
+        <span className="font-bold">Share to Group</span>
       </button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* 2. Etymology Timeline (Spans 2 cols on large screens) */}
-        <div className="lg:col-span-2 bg-tg-bg rounded-3xl p-6 md:p-8 border border-tg-hint/10 shadow-soft">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-tg-hint/10">
-            <div className="p-2 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 rounded-xl">
-               <GitFork size={24} />
-            </div>
-            <h2 className="text-xl font-bold text-tg-text">Evolution</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Etymology Section */}
+        <div className="bg-tg-bg rounded-2xl p-6 border border-tg-hint/20">
+          <div className="flex items-center gap-2 mb-4 text-tg-button">
+            <GitFork size={24} />
+            <h2 className="text-xl font-bold">Origin & History</h2>
           </div>
-          
-          <p className="text-tg-text/80 leading-relaxed mb-8 font-serif text-lg">
+          <p className="text-tg-text/80 leading-relaxed mb-6">
             {data.etymology}
           </p>
 
-          {/* Timeline Viz */}
-          <div className="relative space-y-0">
+          {/* Tree Visualization */}
+          <div className="space-y-4 relative">
+            {/* Vertical line connecting nodes */}
+            <div className="absolute left-4 top-2 bottom-6 w-0.5 bg-tg-hint/20"></div>
+
             {data.roots.map((root, idx) => (
-               <div key={idx} className="flex gap-4 relative pb-8 last:pb-0 group">
-                  {/* Line */}
-                  {idx !== data.roots.length && (
-                    <div className="absolute left-[19px] top-8 bottom-0 w-[2px] bg-gradient-to-b from-tg-button/30 to-tg-button/10 group-last:hidden"></div>
-                  )}
-                  
-                  {/* Dot */}
-                  <div className="relative shrink-0 w-10 h-10 flex items-center justify-center">
-                    <div className="w-4 h-4 rounded-full border-[3px] border-tg-button bg-tg-bg z-10 shadow-[0_0_0_4px_var(--tg-theme-bg-color)]"></div>
-                  </div>
-                  
-                  {/* Content */}
-                  <div className="flex-1 pt-1">
-                    <div className="bg-tg-secondaryBg/50 hover:bg-tg-secondaryBg border border-tg-hint/5 rounded-xl p-4 transition-colors">
-                      <div className="flex flex-wrap items-baseline gap-2 mb-1">
-                        <span className="font-bold text-lg text-tg-text capitalize font-serif italic">{root.term}</span>
-                        <span className="text-xs font-bold text-tg-hint uppercase bg-tg-hint/10 px-2 py-0.5 rounded">{root.language}</span>
-                      </div>
-                      <span className="text-tg-text/70 text-sm">"{root.meaning}"</span>
+               <div key={idx} className="relative pl-10 flex flex-col">
+                  <div className="absolute left-[13px] top-3 w-3 h-3 rounded-full bg-tg-button border-2 border-tg-bg z-10"></div>
+                  <div className="bg-tg-secondaryBg p-3 rounded-lg hover:shadow-sm transition-shadow">
+                    <div className="flex justify-between items-baseline mb-1">
+                      <span className="font-bold text-tg-text italic capitalize">{root.term}</span>
+                      <span className="text-xs text-tg-hint uppercase font-bold">{root.language}</span>
                     </div>
+                    <span className="text-sm text-tg-text/70 block">"{root.meaning}"</span>
                   </div>
                </div>
             ))}
-            
-            {/* Final Target */}
-            <div className="flex gap-4 relative pt-8">
-               <div className="relative shrink-0 w-10 h-10 flex items-center justify-center">
-                 <div className="w-3 h-3 rounded-full bg-tg-text z-10"></div>
-                 <div className="absolute top-0 left-1/2 -ml-[1px] h-8 w-[2px] bg-gradient-to-b from-tg-button/10 to-transparent"></div>
-               </div>
-               <div className="flex-1">
-                 <div className="inline-block px-4 py-2 bg-tg-text text-tg-bg rounded-lg font-bold shadow-md">
-                   {data.word}
-                 </div>
+            {/* Current Word Node */}
+            <div className="relative pl-10 flex flex-col">
+               <div className="absolute left-[13px] top-3 w-3 h-3 rounded-full bg-tg-text border-2 border-tg-bg z-10"></div>
+               <div className="bg-tg-button text-tg-buttonText p-3 rounded-lg shadow-md">
+                  <span className="font-bold block capitalize">{data.word}</span>
+                  <span className="text-xs opacity-80">Current Usage</span>
                </div>
             </div>
           </div>
         </div>
 
-        {/* 3. Sidebar: Context & Facts */}
+        {/* Right Column (Usage & Facts) */}
         <div className="flex flex-col gap-6">
-          
-          {/* Usage Card */}
-          <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-soft flex-1">
-            <div className="flex items-center gap-2 mb-4 text-tg-text/70">
-              <BookOpenCheck size={20} />
-              <h3 className="font-bold text-sm uppercase tracking-wider">Context</h3>
-            </div>
-            <ul className="space-y-4">
+          {/* Usage Examples */}
+          <div className="bg-tg-bg rounded-2xl p-6 border border-tg-hint/20 flex-1">
+            <h3 className="text-lg font-bold text-tg-text mb-3">In Context</h3>
+            <ul className="space-y-3">
               {data.examples.map((ex, i) => (
-                <li key={i} className="relative pl-4 text-tg-text/80 italic text-sm font-serif leading-relaxed">
-                  <div className="absolute left-0 top-2 w-1 h-1 rounded-full bg-tg-hint"></div>
+                <li key={i} className="text-tg-text/80 italic text-sm pl-3 border-l-2 border-tg-hint/30">
                   "{ex}"
                 </li>
               ))}
             </ul>
           </div>
 
-          {/* Fun Fact Card - Sticky Note Style */}
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/20 border border-amber-200 dark:border-amber-800/50 rounded-3xl p-6 shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5">
-              <Lightbulb size={80} />
+          {/* Fun Fact */}
+          <div className="bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-700 rounded-xl p-4 flex gap-3 shadow-sm">
+            <Lightbulb className="text-amber-600 dark:text-amber-400 shrink-0 mt-1" size={24} />
+            <div>
+              <h4 className="font-bold text-amber-900 dark:text-amber-200 text-sm mb-1">Did you know?</h4>
+              <p className="text-sm text-amber-900 dark:text-white font-medium leading-relaxed">
+                {data.funFact}
+              </p>
             </div>
-            <div className="flex items-center gap-2 mb-3 text-amber-600 dark:text-amber-400">
-              <Lightbulb size={20} fill="currentColor" className="opacity-20" />
-              <h4 className="font-bold text-sm uppercase tracking-wider">Trivia</h4>
-            </div>
-            <p className="text-amber-900 dark:text-amber-100 font-medium leading-relaxed relative z-10">
-              {data.funFact}
-            </p>
           </div>
-
         </div>
       </div>
     </div>
