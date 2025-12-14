@@ -1,6 +1,6 @@
+
 // This handler simulates a database connection for Vercel Serverless environment.
-// IMPORTANT: We inline types here because importing from '../types' outside the api directory
-// can cause build failures in some serverless configurations.
+// In a real scenario, this would connect to MongoDB/Postgres.
 
 const XP_ACTIONS = {
   SEARCH: 15,
@@ -9,30 +9,7 @@ const XP_ACTIONS = {
   DAILY_VISIT: 100
 };
 
-// --- LOGIC (Shared with Client for consistency, but enforced here) ---
-
-const calculateLevel = (xp: number) => {
-  return 1 + Math.floor(Math.sqrt(xp / 50));
-};
-
-const checkBadges = (stats: any, newBadges: string[]) => {
-  const addBadge = (id: string, condition: boolean) => {
-    if (condition && !stats.badges.includes(id)) {
-      stats.badges.push(id);
-      newBadges.push(id);
-    }
-  };
-
-  addBadge('first_search', stats.wordsDiscovered >= 1);
-  addBadge('explorer_10', stats.wordsDiscovered >= 10);
-  addBadge('linguist_50', stats.wordsDiscovered >= 50);
-  addBadge('deep_diver', stats.summariesGenerated >= 5);
-  addBadge('social_butterfly', stats.shares >= 3);
-  addBadge('daily_streak_3', stats.currentStreak >= 3);
-};
-
 // In-Memory Fallback for Serverless (Note: This resets on cold start)
-// The server.js implementation handles persistence for the Node server.
 const memDb = new Map<string, any>();
 
 const INITIAL_STATS = {
@@ -48,13 +25,49 @@ const INITIAL_STATS = {
 
 export default async function handler(request: any, response: any) {
   try {
+    // LEADERBOARD ENDPOINT
+    if (request.url?.includes('leaderboard')) {
+       // Convert map to array for leaderboard
+       const users = Array.from(memDb.values());
+       
+       // Sort and format
+       const leaderboard = users
+        .sort((a, b) => b.stats.xp - a.stats.xp)
+        .slice(0, 50)
+        .map((u, index) => ({
+            userId: u.userId,
+            name: u.profile.name,
+            photoUrl: u.profile.photo,
+            xp: u.stats.xp,
+            level: u.stats.level,
+            rank: index + 1,
+            badges: u.stats.badges.length
+        }));
+
+       return response.status(200).json(leaderboard);
+    }
+
     if (request.method === 'GET') {
-      const { userId } = request.query;
+      const { userId, name, photo } = request.query;
       if (!userId) return response.status(400).json({ error: "userId required" });
       
-      let stats = memDb.get(userId.toString()) || { ...INITIAL_STATS };
+      let userData = memDb.get(userId.toString());
       
-      // Daily Streak Logic check on GET
+      if (!userData) {
+          userData = { 
+            userId,
+            profile: { name: name || 'Explorer', photo: photo || '' },
+            stats: { ...INITIAL_STATS } 
+          };
+      } else {
+          // Update profile if provided
+          if (name) userData.profile.name = name;
+          if (photo) userData.profile.photo = photo;
+      }
+      
+      let stats = userData.stats;
+
+      // Daily Streak Logic
       const last = new Date(stats.lastVisit);
       const now = new Date();
       const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
@@ -69,50 +82,53 @@ export default async function handler(request: any, response: any) {
              stats.currentStreak = 1;
           }
           stats.lastVisit = Date.now();
-          memDb.set(userId.toString(), stats);
       }
 
+      memDb.set(userId.toString(), userData);
       return response.status(200).json(stats);
     }
 
     if (request.method === 'POST') {
-      const { userId, action, stats: syncedStats } = request.body;
+      const { userId, action } = request.body;
       if (!userId || !action) return response.status(400).json({ error: "Missing data" });
 
-      // Handle SYNC Action (Client restoring server state)
-      if (action === 'SYNC' && syncedStats) {
-        let currentServerStats = memDb.get(userId.toString()) || { ...INITIAL_STATS };
-        // Trust client if XP is higher (Recovery Mode)
-        if (syncedStats.xp > currentServerStats.xp) {
-             memDb.set(userId.toString(), syncedStats);
-             return response.status(200).json({ stats: syncedStats, synced: true });
-        }
-        return response.status(200).json({ stats: currentServerStats, synced: false });
+      let userData = memDb.get(userId.toString());
+      if (!userData) {
+          // If action happens before GET (rare), init default
+          userData = { userId, profile: { name: 'Unknown', photo: '' }, stats: { ...INITIAL_STATS } };
       }
 
-      let stats = memDb.get(userId.toString()) || { ...INITIAL_STATS };
+      let stats = userData.stats;
       const newBadges: string[] = [];
       const previousLevel = stats.level;
 
-      // 1. Award XP
+      // Logic
       // @ts-ignore
       const xpGain = XP_ACTIONS[action] || 0;
       stats.xp += xpGain;
 
-      // 2. Increment Counters
       if (action === 'SEARCH') stats.wordsDiscovered++;
       if (action === 'SUMMARY') stats.summariesGenerated++;
       if (action === 'SHARE') stats.shares++;
 
-      // 3. Recalculate Level
-      stats.level = calculateLevel(stats.xp);
+      stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
 
-      // 4. Check Badges
-      checkBadges(stats, newBadges);
+      const addBadge = (id: string, condition: boolean) => {
+        if (condition && !stats.badges.includes(id)) {
+          stats.badges.push(id);
+          newBadges.push(id);
+        }
+      };
+
+      addBadge('first_search', stats.wordsDiscovered >= 1);
+      addBadge('explorer_10', stats.wordsDiscovered >= 10);
+      addBadge('linguist_50', stats.wordsDiscovered >= 50);
+      addBadge('deep_diver', stats.summariesGenerated >= 5);
+      addBadge('social_butterfly', stats.shares >= 3);
+      addBadge('daily_streak_3', stats.currentStreak >= 3);
       
-      // Update DB
       stats.lastVisit = Date.now();
-      memDb.set(userId.toString(), stats);
+      memDb.set(userId.toString(), userData);
 
       return response.status(200).json({
          stats,

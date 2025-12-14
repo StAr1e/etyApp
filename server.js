@@ -1,3 +1,4 @@
+
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
@@ -14,18 +15,25 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.GEMINI_API_KEY;
 
-// --- JSON DATABASE IMPLEMENTATION ---
+// --- DATABASE IMPLEMENTATION (File-Based for Persistence) ---
+// In a production environment like Heroku/Render/VPS, this file persists.
+// For Vercel, you would replace this section with MongoDB or Postgres connection.
 const DB_FILE = path.join(__dirname, 'gamification.db.json');
 
-// Load DB
+// DB Structure: { "userId": { stats: {...}, profile: { name, photo } } }
 let db = {};
-if (fs.existsSync(DB_FILE)) {
-    try {
-        db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-    } catch (e) {
-        console.error("Failed to load DB", e);
+
+const loadDb = () => {
+    if (fs.existsSync(DB_FILE)) {
+        try {
+            db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+        } catch (e) {
+            console.error("Failed to load DB", e);
+            db = {};
+        }
     }
-}
+};
+loadDb();
 
 const saveDb = () => {
     try {
@@ -53,58 +61,6 @@ const setCache = (cache, key, data) => {
     }
     cache.set(key, { data, timestamp: Date.now() });
 };
-
-// --- TELEGRAM BOT SETUP ---
-const botToken = process.env.TELEGRAM_BOT_TOKEN;
-let bot = null;
-
-if (botToken) {
-    bot = new Telegraf(botToken);
-    const APP_URL = process.env.RENDER_EXTERNAL_URL || process.env.HOSTING_URL || 'http://localhost:3000';
-
-    bot.command('start', (ctx) => {
-        ctx.reply(
-            'Welcome to Ety.ai! 🌍\n\nDiscover the hidden origins of words.',
-            Markup.inlineKeyboard([
-                Markup.button.webApp('🚀 Launch Explorer', APP_URL)
-            ])
-        );
-    });
-
-    bot.on('inline_query', async (ctx) => {
-        const query = ctx.inlineQuery.query;
-        if (!query) return;
-
-        let title = query;
-        let description = 'Ety.ai Word Result';
-        let messageText = query;
-
-        if (query.includes(':')) {
-            const parts = query.split(':');
-            title = parts[0].trim();
-            description = parts.slice(1).join(':').trim();
-            messageText = `<b>${title.toUpperCase()}</b>\n\n${description}\n\n<i>🔗 Discovered via Ety.ai</i>`;
-        }
-
-        try {
-            await ctx.answerInlineQuery([{
-                type: 'article',
-                id: String(Date.now()),
-                title: title,
-                description: description.substring(0, 100),
-                thumbnail_url: 'https://cdn-icons-png.flaticon.com/512/3976/3976625.png',
-                input_message_content: { message_text: messageText, parse_mode: 'HTML' },
-                reply_markup: { inline_keyboard: [[Markup.button.webApp('🔎 Explore More', APP_URL)]] }
-            }], { cache_time: 0 });
-        } catch (e) {
-            console.error("Inline Query Error:", e);
-        }
-    });
-
-    bot.launch().then(() => console.log('Telegram Bot started'));
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
-}
 
 // Middleware
 app.use(cors());
@@ -194,7 +150,7 @@ app.get('/api/tts', async (req, res) => {
     }
 });
 
-// --- GAMIFICATION ENDPOINT (PERSISTENT DB) ---
+// --- GAMIFICATION ENDPOINTS (PROPER DB) ---
 
 const XP_ACTIONS = { SEARCH: 15, SUMMARY: 30, SHARE: 50, DAILY_VISIT: 100 };
 
@@ -209,11 +165,24 @@ const INITIAL_STATS = {
   badges: []
 };
 
+// 1. Get User Stats
 app.get('/api/gamification', (req, res) => {
-    const { userId } = req.query;
+    const { userId, name, photo } = req.query;
     if (!userId) return res.status(400).json({ error: "userId required" });
 
-    let stats = db[userId] || { ...INITIAL_STATS, lastVisit: Date.now() };
+    const idStr = userId.toString();
+    
+    // Initialize or Retrieve
+    let userData = db[idStr] || { 
+        stats: { ...INITIAL_STATS, lastVisit: Date.now() },
+        profile: { name: name || 'Explorer', photo: photo || '' }
+    };
+
+    // Update Profile Info if provided (Syncing latest Telegram data)
+    if (name) userData.profile.name = name;
+    if (photo) userData.profile.photo = photo;
+
+    let stats = userData.stats;
 
     // Daily Streak Check
     const last = new Date(stats.lastVisit);
@@ -230,42 +199,39 @@ app.get('/api/gamification', (req, res) => {
             stats.currentStreak = 1;
         }
         stats.lastVisit = Date.now();
-        db[userId] = stats;
-        saveDb();
     } else if (stats.lastVisit === 0) {
         stats.lastVisit = Date.now();
-        db[userId] = stats;
-        saveDb();
     }
+
+    // Save state back to DB
+    userData.stats = stats;
+    db[idStr] = userData;
+    saveDb();
 
     res.json(stats);
 });
 
+// 2. Track Action
 app.post('/api/gamification', (req, res) => {
-    const { userId, action, stats: syncedStats } = req.body;
+    const { userId, action } = req.body;
     if (!userId || !action) return res.status(400).json({ error: "Missing data" });
 
-    // Support for Client-side Sync (Recovery)
-    if (action === 'SYNC' && syncedStats) {
-         db[userId] = syncedStats;
-         saveDb();
-         return res.json({ stats: syncedStats, synced: true });
-    }
-
-    let stats = db[userId] || { ...INITIAL_STATS, lastVisit: Date.now() };
+    const idStr = userId.toString();
+    let userData = db[idStr] || { stats: { ...INITIAL_STATS }, profile: { name: 'Unknown', photo: '' } };
+    let stats = userData.stats;
     const newBadges = [];
     const previousLevel = stats.level;
 
-    // Logic
+    // Update Stats
     stats.xp += (XP_ACTIONS[action] || 0);
     if (action === 'SEARCH') stats.wordsDiscovered++;
     if (action === 'SUMMARY') stats.summariesGenerated++;
     if (action === 'SHARE') stats.shares++;
 
-    // Level
+    // Calculate Level
     stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
 
-    // Badges
+    // Check Badges
     const addBadge = (id, condition) => {
         if (condition && !stats.badges.includes(id)) {
             stats.badges.push(id);
@@ -282,10 +248,36 @@ app.post('/api/gamification', (req, res) => {
     stats.lastVisit = Date.now();
     
     // Save
-    db[userId] = stats;
+    db[idStr] = userData;
     saveDb();
 
     res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });
+});
+
+// 3. Leaderboard Endpoint
+app.get('/api/leaderboard', (req, res) => {
+    // Convert DB object to Array
+    const users = Object.keys(db).map(key => ({
+        userId: key,
+        ...db[key].profile,
+        ...db[key].stats
+    }));
+
+    // Sort by XP Descending
+    const leaderboard = users
+        .sort((a, b) => b.xp - a.xp)
+        .slice(0, 50) // Top 50
+        .map((u, index) => ({
+            userId: u.userId,
+            name: u.profile?.name || 'Explorer',
+            photoUrl: u.profile?.photo || '',
+            xp: u.xp,
+            level: u.level,
+            rank: index + 1,
+            badges: u.badges.length
+        }));
+
+    res.json(leaderboard);
 });
 
 app.get('*', (req, res) => {

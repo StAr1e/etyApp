@@ -1,4 +1,5 @@
-import type { UserStats, LevelInfo, Badge, BadgeId } from '../types';
+
+import type { UserStats, LevelInfo, Badge, BadgeId, LeaderboardEntry, TelegramUser } from '../types';
 
 // --- SHARED DEFINITIONS (Used by UI for rendering) ---
 
@@ -84,47 +85,31 @@ export const INITIAL_STATS: UserStats = {
 
 // --- API CLIENT ---
 
-// Helper to push local stats to server (Backup/Restore)
-const syncStatsToServer = async (userId: number, stats: UserStats) => {
+// We now rely on the DatabaseService (via API) as the source of truth.
+// LocalStorage is only used for very basic offline caching to prevent UI flicker,
+// but logic prioritizes server data.
+
+export const fetchUserStats = async (user: TelegramUser): Promise<UserStats> => {
   try {
-    await fetch('/api/gamification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, action: 'SYNC', stats })
+    // Pass name/photo so server can update user profile for leaderboard
+    const params = new URLSearchParams({
+      userId: user.id.toString(),
+      name: user.first_name,
+      photo: user.photo_url || ''
     });
-    console.log("Stats synced to server");
-  } catch (e) {
-    console.error("Failed to sync stats", e);
-  }
-};
 
-export const fetchUserStats = async (userId: number): Promise<UserStats> => {
-  const localKey = `ety_stats_${userId}`;
-  const localStr = localStorage.getItem(localKey);
-  const localStats: UserStats | null = localStr ? JSON.parse(localStr) : null;
-
-  try {
-    const response = await fetch(`/api/gamification?userId=${userId}`);
+    const response = await fetch(`/api/gamification?${params.toString()}`);
+    
     if (!response.ok) throw new Error('Failed to fetch stats');
     const serverStats = await response.json();
     
-    // SMART RECOVERY LOGIC:
-    // If the server (likely Vercel Serverless) has reset and returned 0/Low XP,
-    // but our localStorage has higher XP, TRUST THE LOCAL STORAGE and restore the server.
-    if (localStats && localStats.xp > serverStats.xp) {
-        console.log("⚠️ Server state lost (Cold Start). Restoring from device...");
-        // Restore server state in background
-        syncStatsToServer(userId, localStats);
-        return localStats;
-    }
-
-    // Normal Case: Server is authority. Update local cache.
-    localStorage.setItem(localKey, JSON.stringify(serverStats));
+    // Simple Cache for offline fallback
+    localStorage.setItem(`ety_stats_${user.id}`, JSON.stringify(serverStats));
     return serverStats;
   } catch (error) {
-    console.warn("Gamification API unavailable, using offline defaults:", error);
-    // Fallback to localStorage if API fails (offline mode)
-    return localStats || INITIAL_STATS;
+    console.warn("Gamification API unavailable:", error);
+    const local = localStorage.getItem(`ety_stats_${user.id}`);
+    return local ? JSON.parse(local) : INITIAL_STATS;
   }
 };
 
@@ -143,17 +128,27 @@ export const trackAction = async (
     
     const result = await response.json();
     
-    // Cache latest stats locally for offline support
+    // Update local cache
     localStorage.setItem(`ety_stats_${userId}`, JSON.stringify(result.stats));
     
-    // Map badge IDs back to Badge objects for the UI
     const newBadgeObjects = result.newBadges.map((id: BadgeId) => BADGES[id]).filter(Boolean);
     
     return { stats: result.stats, newBadges: newBadgeObjects };
   } catch (error) {
     console.error("Gamification update failed:", error);
-    // Return existing local stats on failure so UI doesn't break
-    const saved = localStorage.getItem(`ety_stats_${userId}`);
-    return { stats: saved ? JSON.parse(saved) : INITIAL_STATS, newBadges: [] };
+    // Optimistic UI update could go here, but for "Professional" data integrity, we return current known state
+    const local = localStorage.getItem(`ety_stats_${userId}`);
+    return { stats: local ? JSON.parse(local) : INITIAL_STATS, newBadges: [] };
+  }
+};
+
+export const fetchLeaderboard = async (): Promise<LeaderboardEntry[]> => {
+  try {
+    const response = await fetch('/api/leaderboard');
+    if (!response.ok) throw new Error('Failed to fetch leaderboard');
+    return await response.json();
+  } catch (error) {
+    console.error(error);
+    return [];
   }
 };

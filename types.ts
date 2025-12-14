@@ -1,3 +1,4 @@
+
 export interface RootOrigin {
   term: string;
   language: string;
@@ -43,6 +44,17 @@ export interface UserStats {
   lastVisit: number;
   currentStreak: number;
   badges: BadgeId[];
+  rank?: number; // Global ranking
+}
+
+export interface LeaderboardEntry {
+  userId: number;
+  name: string;
+  photoUrl?: string;
+  xp: number;
+  level: number;
+  rank: number;
+  badges: number;
 }
 
 export interface LevelInfo {
