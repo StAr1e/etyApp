@@ -13,6 +13,26 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.GEMINI_API_KEY;
 
+// --- CACHE SETUP ---
+const wordCache = new Map(); // Stores word details
+const summaryCache = new Map(); // Stores summaries
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 Hours
+
+const getFromCache = (cache, key) => {
+    const item = cache.get(key);
+    if (item && Date.now() - item.timestamp < CACHE_TTL) return item.data;
+    return null;
+};
+
+const setCache = (cache, key, data) => {
+    if (cache.size > 200) {
+        // Simple LRU-like cleanup: delete the first key inserted
+        const firstKey = cache.keys().next().value;
+        cache.delete(firstKey);
+    }
+    cache.set(key, { data, timestamp: Date.now() });
+};
+
 // Initialize Telegram Bot
 const botToken = process.env.TELEGRAM_BOT_TOKEN;
 let bot = null;
@@ -81,6 +101,12 @@ app.get('/api/details', async (req, res) => {
     const { word } = req.query;
     if (!word) return res.status(400).json({ error: "Word required" });
 
+    const cleanWord = word.trim().toLowerCase();
+    
+    // Check Cache
+    const cached = getFromCache(wordCache, cleanWord);
+    if (cached) return res.json(cached);
+
     const prompt = `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details. If the word is misspelled, analyze the closest correct word.`;
     
     // Manual Schema definition for consistency
@@ -112,7 +138,7 @@ app.get('/api/details', async (req, res) => {
 
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-flash-latest',
+            model: 'gemini-flash-lite-latest',
             contents: prompt,
             config: {
                 responseMimeType: 'application/json',
@@ -122,10 +148,11 @@ app.get('/api/details', async (req, res) => {
         });
         
         let text = result.text.trim();
-        // Clean markdown if present
         if (text.startsWith('```')) text = text.replace(/^```(json)?/, '').replace(/```$/, '');
         
-        res.json(JSON.parse(text));
+        const data = JSON.parse(text);
+        setCache(wordCache, cleanWord, data); // Save Cache
+        res.json(data);
     } catch (e) {
         console.error("Details API Error:", e);
         res.status(500).json({ error: e.message });
@@ -138,12 +165,20 @@ app.get('/api/summary', async (req, res) => {
     const { word } = req.query;
     if (!word) return res.status(400).json({ error: "Word required" });
 
+    const cleanWord = word.trim().toLowerCase();
+    
+    // Check Cache
+    const cached = getFromCache(summaryCache, cleanWord);
+    if (cached) return res.json({ summary: cached });
+
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-flash-latest',
+            model: 'gemini-flash-lite-latest',
             contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
         });
-        res.json({ summary: result.text });
+        const text = result.text;
+        setCache(summaryCache, cleanWord, text); // Save Cache
+        res.json({ summary: text });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }

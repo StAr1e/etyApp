@@ -12,6 +12,11 @@ declare global {
   }
 }
 
+// --- CLIENT SIDE CACHE ---
+// Simple in-memory cache to prevent re-fetching the same word in one session
+const wordCache = new Map<string, WordData>();
+const summaryCache = new Map<string, string>();
+
 // Helper to decode base64 audio
 const decodeAudio = (base64: string): ArrayBuffer => {
   const binaryString = atob(base64);
@@ -54,13 +59,21 @@ const WORD_SCHEMA: Schema = {
 // --- FETCH FUNCTIONS ---
 
 export const fetchWordDetails = async (word: string): Promise<WordData> => {
+  const cleanWord = word.trim().toLowerCase();
+  
+  // 1. Check Cache
+  if (wordCache.has(cleanWord)) {
+    console.log(`⚡ Cache hit for: ${cleanWord}`);
+    return wordCache.get(cleanWord)!;
+  }
+
   // HYBRID MODE: Direct Client Call (Only works if VITE_GEMINI_API_KEY is in .env)
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
     console.log("⚠️ DEV MODE: Calling Gemini directly (Client-side)");
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: 'gemini-flash-latest',
+        model: 'gemini-flash-lite-latest',
         contents: `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details.`,
         config: {
           responseMimeType: 'application/json',
@@ -68,7 +81,9 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
           systemInstruction: "You are an expert etymologist."
         }
       });
-      return JSON.parse(response.text!) as WordData;
+      const data = JSON.parse(response.text!) as WordData;
+      wordCache.set(cleanWord, data); // Save to cache
+      return data;
     } catch (e: any) {
       console.error("Local Dev Error:", e);
       if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
@@ -91,7 +106,6 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
        const text = await response.text();
-       // If we got HTML, it means the API route failed and Vercel served the 404/index page
        if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
           throw new Error("API Route Missing: Please check Vercel logs/deployment.");
        }
@@ -104,6 +118,7 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     }
 
     const data = await response.json();
+    wordCache.set(cleanWord, data); // Save to cache
     return data as WordData;
   } catch (error: any) {
     console.error("Error fetching word details:", error);
@@ -112,14 +127,22 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
 };
 
 export const fetchWordSummary = async (word: string): Promise<string> => {
+  const cleanWord = word.trim().toLowerCase();
+  
+  if (summaryCache.has(cleanWord)) {
+    return summaryCache.get(cleanWord)!;
+  }
+
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       const response = await ai.models.generateContent({
-        model: 'gemini-flash-latest',
+        model: 'gemini-flash-lite-latest',
         contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
       });
-      return response.text || "No summary available.";
+      const text = response.text || "No summary available.";
+      summaryCache.set(cleanWord, text);
+      return text;
     } catch (e: any) { 
         if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
             return "Daily AI usage limit reached.";
@@ -134,13 +157,19 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
     
     if (!response.ok) throw new Error("Failed to fetch summary");
     const data = await response.json();
-    return data.summary || "Could not generate summary.";
+    const text = data.summary || "Could not generate summary.";
+    summaryCache.set(cleanWord, text);
+    return text;
   } catch (error) {
     return "Sorry, I couldn't generate a summary right now.";
   }
 };
 
 export const fetchPronunciation = async (text: string): Promise<ArrayBuffer | null> => {
+  // Audio is heavy, we don't cache it in memory to avoid OOM, browser cache handles the fetch call usually if headers are set, 
+  // but since it's a POST/search query often, we just rely on browser or let it fetch.
+  // We can add a simple blob cache if needed, but text-to-speech is less likely to be repeated instantly than text data.
+  
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
