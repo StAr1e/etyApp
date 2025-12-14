@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
@@ -7,7 +6,7 @@ import { LeaderboardModal } from './components/LeaderboardModal';
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Home, LayoutList, Search, BookOpen } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -27,22 +26,25 @@ export default function App() {
   const [summary, setSummary] = useState<string | null>(null);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   
+  // Ref to prevent double-fetching in React Strict Mode
   const hasInitialized = useRef(false);
 
   // --- Handlers ---
 
   const handleGamificationAction = async (action: 'SEARCH' | 'SUMMARY' | 'SHARE') => {
-    if (!user) return; 
+    if (!user) return; // Cannot track if no user ID
 
-    // Server is source of truth now
+    // Optimistic update could happen here, but for now we wait for server response
     const { stats, newBadges } = await trackAction(user.id, action);
     
+    // Check for level up
     if (stats.level > userStats.level) {
       setLevelUpToast({ show: true, level: stats.level });
       setTimeout(() => setLevelUpToast({ show: false, level: 0 }), 4000);
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     }
     
+    // Show badge toast 
     if (newBadges.length > 0) {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     }
@@ -54,8 +56,10 @@ export default function App() {
     if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
       setUser(window.Telegram.WebApp.initDataUnsafe.user);
     } else {
+      console.warn("User data not available. Please open this app within Telegram.");
+      // Dev mock user if needed
       if (import.meta.env.DEV) {
-          setUser({ id: 12345, first_name: "TestUser", photo_url: "" } as TelegramUser);
+          setUser({ id: 12345, first_name: "TestUser" } as TelegramUser);
       }
     }
   };
@@ -67,13 +71,14 @@ export default function App() {
        return;
      }
 
-     if (showProfile) {
-       setShowProfile(false);
+     if (showLeaderboard) {
+       setShowLeaderboard(false);
+       if (view === 'home') setShowProfile(true); // Return to profile if we were there
        return;
      }
 
-     if (showLeaderboard) {
-       setShowLeaderboard(false);
+     if (showProfile) {
+       setShowProfile(false);
        return;
      }
 
@@ -83,7 +88,7 @@ export default function App() {
      if (window.Telegram?.WebApp) {
        window.Telegram.WebApp.HapticFeedback.selectionChanged();
      }
-  }, [showSummaryModal, showProfile, showLeaderboard]);
+  }, [showSummaryModal, showProfile, showLeaderboard, view]);
 
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
@@ -105,7 +110,7 @@ export default function App() {
     } finally {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
-  }, [wordData, user, userStats]);
+  }, [wordData, user, userStats]); // dependencies
 
   const handleSearch = async (term: string) => {
     if (!term) return;
@@ -145,12 +150,11 @@ export default function App() {
     if (hasInitialized.current) return;
     hasInitialized.current = true;
 
+    // 1. Initialize Telegram WebApp
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp;
       tg.expand();
       tg.ready();
-      tg.setHeaderColor(tg.themeParams.bg_color || '#ffffff');
-      tg.setBackgroundColor(tg.themeParams.bg_color || '#ffffff');
 
       if (tg.initDataUnsafe?.user) {
         setUser(tg.initDataUnsafe.user);
@@ -163,169 +167,227 @@ export default function App() {
       });
     }
     
+    // 2. Load History
     const saved = localStorage.getItem('ety_history');
-    if (saved) setHistory(JSON.parse(saved));
+    if (saved) {
+      setHistory(JSON.parse(saved));
+    }
 
+    // 3. Handle Deep Linking
     const params = new URLSearchParams(window.location.search);
-    const deepLinkWord = params.get('word') || params.get('startapp') || window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+    const deepLinkWord = params.get('word') || 
+                         params.get('startapp') || 
+                         window.Telegram?.WebApp?.initDataUnsafe?.start_param;
 
-    if (deepLinkWord) setTimeout(() => handleSearch(deepLinkWord), 100);
+    if (deepLinkWord) {
+      setTimeout(() => handleSearch(deepLinkWord), 100);
+    }
+
   }, []);
 
+  // Fetch Stats when User is Identified
   useEffect(() => {
-    if (user) fetchUserStats(user).then(setUserStats);
+    if (user) {
+        fetchUserStats(user).then(setUserStats);
+    }
   }, [user]);
 
-  // Handle Back Button
+  // Manage Native Buttons State
   useEffect(() => {
     if (!window.Telegram?.WebApp) return;
     const tg = window.Telegram.WebApp;
-    const onBack = () => handleBack();
 
-    if (view === 'result' || showProfile || showLeaderboard || showSummaryModal) {
+    const onMainBtnClick = () => handleGenerateSummary();
+    const onBackBtnClick = () => handleBack();
+
+    if (view === 'result' && !showProfile && !showLeaderboard) {
       tg.BackButton.show();
-      tg.BackButton.onClick(onBack);
+      tg.BackButton.onClick(onBackBtnClick);
+
+      if (!showSummaryModal) {
+        tg.MainButton.show();
+        tg.MainButton.onClick(onMainBtnClick);
+      } else {
+        tg.MainButton.hide();
+      }
+
+    } else if (showProfile || showLeaderboard) {
+       tg.BackButton.show();
+       tg.BackButton.onClick(onBackBtnClick);
+       tg.MainButton.hide();
     } else {
       tg.BackButton.hide();
-      tg.BackButton.offClick(onBack);
+      tg.MainButton.hide();
+      tg.BackButton.offClick(onBackBtnClick);
+      tg.MainButton.offClick(onMainBtnClick);
     }
-    return () => tg.BackButton.offClick(onBack);
-  }, [view, showProfile, showLeaderboard, showSummaryModal]);
 
+    return () => {
+      tg.MainButton.offClick(onMainBtnClick);
+      tg.BackButton.offClick(onBackBtnClick);
+    };
+  }, [view, showSummaryModal, showProfile, showLeaderboard, handleGenerateSummary, handleBack]);
+
+  const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
   const levelInfo = getLevelInfo(userStats.xp);
   const nextLevelProgress = ((userStats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100;
 
   return (
-    <div className="min-h-screen bg-tg-bg text-tg-text font-sans flex flex-col overflow-hidden relative selection:bg-tg-button selection:text-white">
+    <div className="min-h-screen bg-tg-bg text-tg-text font-sans relative overflow-x-hidden selection:bg-tg-button selection:text-white">
       
-      {/* Dynamic Background */}
-      <div className="fixed top-0 left-0 w-full h-64 bg-gradient-to-b from-tg-button/5 to-transparent pointer-events-none z-0"></div>
-      
-      {/* Header Bar */}
-      <div className="pt-4 px-6 pb-2 flex justify-between items-center relative z-20">
-         <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-tg-button to-purple-600 flex items-center justify-center text-white font-serif font-bold text-lg shadow-glow">
-              Æ
-            </div>
-            <span className="font-bold text-lg tracking-tight">Ety.ai</span>
-         </div>
+      {/* Ambient Background Glow (Theme Aware) */}
+      <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[50%] bg-tg-button rounded-full blur-[120px] opacity-[0.08] pointer-events-none z-0"></div>
+      <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-500 rounded-full blur-[100px] opacity-[0.05] pointer-events-none z-0"></div>
 
-         {/* Stats Chip */}
-         {user && (
-           <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg/80 backdrop-blur-md px-3 py-1 rounded-full border border-tg-hint/10 shadow-sm active:scale-95 transition-transform">
-              <div className="w-5 h-5 rounded-full bg-yellow-500 text-white flex items-center justify-center text-[10px] font-bold">
-                 {userStats.level}
+      {/* Content Container */}
+      <div className="w-full max-w-2xl mx-auto relative z-10 min-h-screen flex flex-col p-4 md:p-6">
+        
+        {/* Top Bar: Split Layout (Stats Left, User Right) */}
+        <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
+           
+           {/* Level / XP Bar */}
+           <button onClick={() => setShowProfile(true)} className="flex items-center gap-3 group">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-tg-button to-purple-500 flex items-center justify-center text-white font-bold shadow-lg border-2 border-tg-bg">
+                   {userStats.level}
+                </div>
+                {userStats.badges.length > 0 && (
+                   <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-yellow-900 p-0.5 rounded-full border border-tg-bg">
+                      <Crown size={10} fill="currentColor" />
+                   </div>
+                )}
               </div>
-              <div className="flex flex-col items-start leading-none">
-                 <span className="text-[10px] text-tg-hint font-bold uppercase">XP</span>
-                 <span className="text-xs font-bold">{userStats.xp}</span>
+              <div className="flex flex-col items-start">
+                 <span className="text-xs font-bold text-tg-text group-hover:text-tg-button transition-colors">{levelInfo.title}</span>
+                 <div className="w-24 h-1.5 bg-tg-secondaryBg rounded-full mt-1 overflow-hidden">
+                    <div className="h-full bg-tg-button rounded-full transition-all duration-500" style={{ width: `${nextLevelProgress}%` }}></div>
+                 </div>
               </div>
            </button>
-         )}
-      </div>
+           
+           {/* User Profile / Login */}
+           {user ? (
+             <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-pointer hover:bg-tg-button/5 transition-colors backdrop-blur-md bg-opacity-80">
+               {user.photo_url ? (
+                 <img src={user.photo_url} alt="Profile" className="w-6 h-6 rounded-full ring-2 ring-white dark:ring-black" />
+               ) : (
+                 <div className="w-6 h-6 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold">
+                   {user.first_name[0]}
+                 </div>
+               )}
+               <span className="text-sm font-semibold text-tg-text truncate max-w-[100px]">{user.first_name}</span>
+             </button>
+           ) : (
+             <button 
+               onClick={handleLogin}
+               className="flex items-center gap-2 text-xs font-bold bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white px-3 py-1.5 rounded-full transition-all"
+             >
+               <UserIcon size={14} />
+               Sign In
+             </button>
+           )}
+        </div>
 
-      {/* Main Scrollable Content */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden relative z-10 pb-24">
-         
-         {/* Home View */}
-         <div className={`transition-all duration-500 px-6 ${view === 'home' ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-10 hidden'}`}>
-            <div className="mt-8 mb-12 text-center">
-               <h1 className="text-4xl font-serif font-black mb-2 bg-clip-text text-transparent bg-gradient-to-br from-tg-text to-tg-text/60">
-                 Explore Words
-               </h1>
-               <p className="text-tg-hint font-medium">Uncover the hidden history of language.</p>
-            </div>
-
-            <div className="max-w-md mx-auto relative z-30">
-               <SearchBar 
-                  onSearch={handleSearch} 
-                  isLoading={isLoading} 
-                  history={history}
-                  onHistorySelect={(term) => handleSearch(term)}
+        {/* Branding Header */}
+        <header className={`flex flex-col items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${view === 'result' ? 'h-0 overflow-hidden opacity-0 scale-95' : 'flex-1 max-h-[40vh] opacity-100 scale-100'}`}>
+          <div className="text-center">
+             <div className="relative inline-block">
+               <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-20 rounded-full"></div>
+               <img 
+                 src="/logo.png" 
+                 alt="Ety.ai" 
+                 className="relative z-10 w-28 h-28 mx-auto mb-6 object-contain animate-float drop-shadow-xl" 
+                 onError={(e) => {
+                   e.currentTarget.style.display = 'none';
+                   e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden');
+                 }}
                />
-            </div>
-            
-            {/* Quick Actions Grid for Gamification */}
-            <div className="mt-12 grid grid-cols-2 gap-4 max-w-md mx-auto">
-                <button 
-                   onClick={() => setShowLeaderboard(true)}
-                   className="p-4 rounded-2xl bg-gradient-to-br from-yellow-500/10 to-orange-500/10 border border-yellow-500/20 flex flex-col items-center gap-2 hover:bg-yellow-500/20 transition-colors"
-                >
-                   <Trophy className="text-yellow-600" size={24} />
-                   <span className="font-bold text-sm text-yellow-800 dark:text-yellow-200">Leaderboard</span>
-                </button>
-                <button 
-                   onClick={() => user ? setShowProfile(true) : handleLogin()}
-                   className="p-4 rounded-2xl bg-gradient-to-br from-tg-button/10 to-purple-500/10 border border-tg-button/20 flex flex-col items-center gap-2 hover:bg-tg-button/20 transition-colors"
-                >
-                   <UserIcon className="text-tg-button" size={24} />
-                   <span className="font-bold text-sm text-tg-button">My Profile</span>
-                </button>
-            </div>
-         </div>
+               <div className="fallback-logo hidden w-20 h-20 bg-gradient-to-br from-tg-button to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-tg-button/30 text-white rotate-3 hover:rotate-6 transition-transform">
+                 <span className="font-serif font-black text-4xl">Æ</span>
+               </div>
+             </div>
+             <h1 className="text-3xl md:text-4xl font-black tracking-tight text-tg-text mb-2">Ety.ai</h1>
+             <p className="text-tg-hint font-medium text-base">Uncover the stories behind words</p>
+          </div>
+        </header>
 
-         {/* Result View */}
-         {view === 'result' && wordData && (
-            <div className="animate-in slide-in-from-bottom-10 fade-in duration-500 px-4 md:px-6 py-6">
+        {/* Main Search Area */}
+        <main className={`relative z-10 transition-all duration-500 ${view === 'result' ? 'mt-4' : 'mt-8'}`}>
+          
+          <div className={`${view === 'result' ? '' : 'max-w-md mx-auto'}`}>
+            <SearchBar 
+              onSearch={handleSearch} 
+              isLoading={isLoading} 
+              history={history}
+              onHistorySelect={(term) => handleSearch(term)}
+            />
+          </div>
+
+          {/* Loading State */}
+          {isLoading && (
+            <div className="mt-12 text-center animate-in fade-in zoom-in duration-300">
+              <div className="w-16 h-16 mx-auto bg-tg-secondaryBg rounded-full mb-4 flex items-center justify-center relative">
+                 <div className="absolute inset-0 border-4 border-tg-button/20 rounded-full"></div>
+                 <div className="absolute inset-0 border-4 border-tg-button border-t-transparent rounded-full animate-spin"></div>
+                 <Sparkles className="text-tg-button" size={24} />
+              </div>
+              <p className="text-tg-text font-serif italic text-lg animate-pulse">Consulting the archives...</p>
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && (
+            <div className={`mt-6 mx-auto max-w-md p-5 rounded-2xl flex items-start gap-4 shadow-sm border animate-in slide-in-from-bottom-2 ${
+                isQuotaError 
+                 ? "bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-100 border-amber-200 dark:border-amber-800/30" 
+                 : "bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-200 border-red-200 dark:border-red-800/30"
+            }`}>
+              <div className={`p-2 rounded-full shrink-0 ${isQuotaError ? 'bg-amber-100 dark:bg-amber-800' : 'bg-red-100 dark:bg-red-800'}`}>
+                {isQuotaError ? <CloudOff size={20} /> : <AlertTriangle size={20} />}
+              </div>
+              <div>
+                 <p className="font-bold text-base mb-1">{isQuotaError ? "Daily Limit Reached" : "Connection Error"}</p>
+                 <p className="text-sm opacity-90 leading-relaxed">{error}</p>
+                 {!isQuotaError && error.includes("API Key missing") && (
+                   <p className="text-xs mt-3 font-mono bg-black/5 dark:bg-white/5 p-2 rounded border border-black/5">
+                     ENV: GEMINI_API_KEY missing
+                   </p>
+                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Results View */}
+          {view === 'result' && wordData && !isLoading && (
+             <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
+                {!window.Telegram?.WebApp && (
+                  <button 
+                    onClick={handleBack}
+                    className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"
+                  >
+                    <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Search
+                  </button>
+                )}
+                
                 <WordCard data={wordData} onShare={() => user && handleGamificationAction('SHARE')} />
                 
                 {!window.Telegram?.WebApp && (
                    <button 
                      onClick={handleGenerateSummary}
-                     className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg flex items-center justify-center gap-3"
+                     className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"
                    >
                      <Wand2 size={22} />
                      Generate Deep Dive
                    </button>
                 )}
-            </div>
-         )}
-         
-         {/* Loaders & Errors */}
-         {isLoading && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-tg-bg/50 backdrop-blur-sm z-50">
-               <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg animate-bounce">
-                  <Sparkles className="text-tg-button" size={24} />
-               </div>
-               <p className="mt-4 font-serif italic text-tg-hint">Consulting the archives...</p>
-            </div>
-         )}
-
-         {error && (
-            <div className="mx-6 mt-8 p-4 bg-red-50 text-red-800 rounded-xl flex items-center gap-3 border border-red-100">
-               <AlertTriangle size={20} />
-               <span className="text-sm font-medium">{error}</span>
-            </div>
-         )}
-      </div>
-
-      {/* Professional Bottom Nav (Mobile App Feel) */}
-      <div className="fixed bottom-0 left-0 right-0 bg-tg-bg/90 backdrop-blur-xl border-t border-tg-hint/10 pb-safe pt-2 px-6 flex justify-around items-center z-40 h-[70px]">
-         <button onClick={() => handleBack()} className={`flex flex-col items-center gap-1 ${view === 'home' ? 'text-tg-button' : 'text-tg-hint'}`}>
-            <Home size={24} strokeWidth={view === 'home' ? 2.5 : 2} />
-            <span className="text-[10px] font-bold">Home</span>
-         </button>
-         <div className="w-px h-8 bg-tg-hint/10"></div>
-         <button onClick={() => setShowLeaderboard(true)} className={`flex flex-col items-center gap-1 ${showLeaderboard ? 'text-tg-button' : 'text-tg-hint'}`}>
-            <Trophy size={24} strokeWidth={showLeaderboard ? 2.5 : 2} />
-            <span className="text-[10px] font-bold">Ranks</span>
-         </button>
-         <div className="w-px h-8 bg-tg-hint/10"></div>
-         <button onClick={() => user ? setShowProfile(true) : handleLogin()} className={`flex flex-col items-center gap-1 ${showProfile ? 'text-tg-button' : 'text-tg-hint'}`}>
-             <div className="relative">
-               {user?.photo_url ? (
-                 <img src={user.photo_url} className={`w-6 h-6 rounded-full border-2 ${showProfile ? 'border-tg-button' : 'border-transparent'}`} />
-               ) : (
-                 <UserIcon size={24} strokeWidth={showProfile ? 2.5 : 2} />
-               )}
              </div>
-            <span className="text-[10px] font-bold">Profile</span>
-         </button>
+          )}
+        </main>
       </div>
 
-      {/* Modals */}
+      {/* Level Up Toast */}
       {levelUpToast.show && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-top fade-in">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top duration-500">
            <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 font-bold border-2 border-white/30">
               <Trophy size={20} className="animate-bounce" />
               <span>Level Up! Rank {levelUpToast.level} Achieved!</span>
@@ -333,21 +395,64 @@ export default function App() {
         </div>
       )}
 
+      {/* Summary Modal */}
       {showSummaryModal && summary && (
-        <div className="fixed inset-0 z-[120] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+        <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-md animate-in fade-in duration-300 p-0 md:p-4">
            <div className="absolute inset-0" onClick={() => setShowSummaryModal(false)}></div>
-           <div className="bg-tg-bg w-full max-w-lg rounded-3xl p-8 shadow-2xl relative max-h-[80vh] overflow-y-auto">
-              <button onClick={() => setShowSummaryModal(false)} className="absolute top-4 right-4 p-2 bg-tg-secondaryBg rounded-full"><X size={20}/></button>
-              <h2 className="text-2xl font-serif font-bold mb-4 flex items-center gap-2 text-tg-button"><Wand2/> Deep Dive</h2>
-              <div className="prose prose-lg dark:prose-invert font-serif leading-relaxed text-tg-text/90">
-                 {summary}
+           <div 
+             className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-[2rem] md:rounded-3xl p-8 shadow-2xl animate-in slide-in-from-bottom duration-300 relative border-t md:border border-white/20 dark:border-white/5 max-h-[85vh] overflow-y-auto no-scrollbar"
+           >
+              <div className="w-12 h-1.5 bg-tg-hint/20 rounded-full mx-auto mb-6 md:hidden"></div>
+              
+              <button 
+                onClick={() => setShowSummaryModal(false)}
+                className="absolute top-6 right-6 p-2 bg-tg-secondaryBg rounded-full text-tg-hint hover:text-tg-text transition-colors hover:rotate-90 duration-300"
+              >
+                <X size={20} />
+              </button>
+              
+              <div className="flex items-center gap-3 mb-6 text-tg-button">
+                 <div className="p-2.5 bg-tg-button/10 rounded-xl">
+                    <Wand2 size={24} />
+                 </div>
+                 <h2 className="text-2xl font-bold font-serif text-tg-text">Deep Dive</h2>
+              </div>
+              
+              <div className="prose prose-lg dark:prose-invert text-tg-text/90 leading-relaxed font-serif first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px] first-letter:text-tg-button">
+                <p>{summary}</p>
+              </div>
+
+              <div className="mt-8 pt-6 border-t border-tg-hint/10">
+                <button 
+                  onClick={() => setShowSummaryModal(false)}
+                  className="w-full py-3.5 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-hint/10 transition-colors"
+                >
+                  Close
+                </button>
               </div>
            </div>
         </div>
       )}
 
-      {showProfile && <ProfileModal stats={userStats} onClose={() => setShowProfile(false)} />}
-      {showLeaderboard && <LeaderboardModal onClose={() => setShowLeaderboard(false)} currentUserId={user?.id} />}
+      {/* Profile Modal */}
+      {showProfile && (
+        <ProfileModal 
+          stats={userStats} 
+          onClose={() => setShowProfile(false)} 
+          onShowLeaderboard={() => {
+            setShowProfile(false);
+            setShowLeaderboard(true);
+          }}
+        />
+      )}
+
+      {/* Leaderboard Modal */}
+      {showLeaderboard && (
+        <LeaderboardModal 
+          onClose={() => setShowLeaderboard(false)} 
+          currentUserId={user?.id}
+        />
+      )}
     </div>
   );
 }
