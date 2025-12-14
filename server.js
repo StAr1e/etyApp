@@ -242,8 +242,15 @@ app.get('/api/gamification', (req, res) => {
 });
 
 app.post('/api/gamification', (req, res) => {
-    const { userId, action } = req.body;
+    const { userId, action, stats: syncedStats } = req.body;
     if (!userId || !action) return res.status(400).json({ error: "Missing data" });
+
+    // Support for Client-side Sync (Recovery)
+    if (action === 'SYNC' && syncedStats) {
+         db[userId] = syncedStats;
+         saveDb();
+         return res.json({ stats: syncedStats, synced: true });
+    }
 
     let stats = db[userId] || { ...INITIAL_STATS, lastVisit: Date.now() };
     const newBadges = [];

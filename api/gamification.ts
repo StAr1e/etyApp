@@ -76,8 +76,19 @@ export default async function handler(request: any, response: any) {
     }
 
     if (request.method === 'POST') {
-      const { userId, action } = request.body;
+      const { userId, action, stats: syncedStats } = request.body;
       if (!userId || !action) return response.status(400).json({ error: "Missing data" });
+
+      // Handle SYNC Action (Client restoring server state)
+      if (action === 'SYNC' && syncedStats) {
+        let currentServerStats = memDb.get(userId.toString()) || { ...INITIAL_STATS };
+        // Trust client if XP is higher (Recovery Mode)
+        if (syncedStats.xp > currentServerStats.xp) {
+             memDb.set(userId.toString(), syncedStats);
+             return response.status(200).json({ stats: syncedStats, synced: true });
+        }
+        return response.status(200).json({ stats: currentServerStats, synced: false });
+      }
 
       let stats = memDb.get(userId.toString()) || { ...INITIAL_STATS };
       const newBadges: string[] = [];

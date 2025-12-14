@@ -1,4 +1,4 @@
-import type { UserStats, LevelInfo, Badge, BadgeId } from '../types.ts';
+import type { UserStats, LevelInfo, Badge, BadgeId } from '../types';
 
 // --- SHARED DEFINITIONS (Used by UI for rendering) ---
 
@@ -84,17 +84,47 @@ export const INITIAL_STATS: UserStats = {
 
 // --- API CLIENT ---
 
+// Helper to push local stats to server (Backup/Restore)
+const syncStatsToServer = async (userId: number, stats: UserStats) => {
+  try {
+    await fetch('/api/gamification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, action: 'SYNC', stats })
+    });
+    console.log("Stats synced to server");
+  } catch (e) {
+    console.error("Failed to sync stats", e);
+  }
+};
+
 export const fetchUserStats = async (userId: number): Promise<UserStats> => {
+  const localKey = `ety_stats_${userId}`;
+  const localStr = localStorage.getItem(localKey);
+  const localStats: UserStats | null = localStr ? JSON.parse(localStr) : null;
+
   try {
     const response = await fetch(`/api/gamification?userId=${userId}`);
     if (!response.ok) throw new Error('Failed to fetch stats');
-    const data = await response.json();
-    return data;
+    const serverStats = await response.json();
+    
+    // SMART RECOVERY LOGIC:
+    // If the server (likely Vercel Serverless) has reset and returned 0/Low XP,
+    // but our localStorage has higher XP, TRUST THE LOCAL STORAGE and restore the server.
+    if (localStats && localStats.xp > serverStats.xp) {
+        console.log("⚠️ Server state lost (Cold Start). Restoring from device...");
+        // Restore server state in background
+        syncStatsToServer(userId, localStats);
+        return localStats;
+    }
+
+    // Normal Case: Server is authority. Update local cache.
+    localStorage.setItem(localKey, JSON.stringify(serverStats));
+    return serverStats;
   } catch (error) {
     console.warn("Gamification API unavailable, using offline defaults:", error);
     // Fallback to localStorage if API fails (offline mode)
-    const saved = localStorage.getItem(`ety_stats_${userId}`);
-    return saved ? JSON.parse(saved) : INITIAL_STATS;
+    return localStats || INITIAL_STATS;
   }
 };
 
@@ -122,6 +152,8 @@ export const trackAction = async (
     return { stats: result.stats, newBadges: newBadgeObjects };
   } catch (error) {
     console.error("Gamification update failed:", error);
-    return { stats: INITIAL_STATS, newBadges: [] };
+    // Return existing local stats on failure so UI doesn't break
+    const saved = localStorage.getItem(`ety_stats_${userId}`);
+    return { stats: saved ? JSON.parse(saved) : INITIAL_STATS, newBadges: [] };
   }
 };
