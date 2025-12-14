@@ -6,6 +6,7 @@ import cors from 'cors';
 import { Telegraf, Markup } from 'telegraf';
 import { GoogleGenAI } from '@google/genai';
 import { fileURLToPath } from 'url';
+import mongoose from 'mongoose';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,26 +14,66 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.GEMINI_API_KEY;
+const MONGODB_URI = process.env.MONGODB_URI;
 
-// --- DATABASE IMPLEMENTATION (File-Based for Persistence) ---
+// --- DATABASE STRATEGY ---
+// If MONGODB_URI is present, use MongoDB. Otherwise, fallback to local JSON file.
+let useMongo = false;
+let User; // Mongoose Model
+
+// MongoDB Setup
+if (MONGODB_URI) {
+    console.log("Connecting to MongoDB...");
+    mongoose.connect(MONGODB_URI)
+        .then(() => {
+            console.log("MongoDB Connected");
+            useMongo = true;
+            
+            const UserSchema = new mongoose.Schema({
+                userId: { type: String, required: true, unique: true, index: true },
+                profile: {
+                    name: { type: String, default: 'Explorer' },
+                    photo: { type: String, default: '' }
+                },
+                stats: {
+                    xp: { type: Number, default: 0 },
+                    level: { type: Number, default: 1 },
+                    wordsDiscovered: { type: Number, default: 0 },
+                    summariesGenerated: { type: Number, default: 0 },
+                    shares: { type: Number, default: 0 },
+                    lastVisit: { type: Number, default: Date.now },
+                    currentStreak: { type: Number, default: 1 },
+                    badges: { type: [String], default: [] }
+                }
+            }, { timestamps: true });
+            
+            User = mongoose.models.User || mongoose.model('User', UserSchema);
+        })
+        .catch(err => {
+            console.error("MongoDB Connection Failed:", err);
+            console.log("Falling back to JSON file storage.");
+        });
+}
+
+// File-Based DB Fallback
 const DB_FILE = path.join(__dirname, 'gamification.db.json');
-let db = {};
+let localDb = {};
 
-const loadDb = () => {
+const loadLocalDb = () => {
     if (fs.existsSync(DB_FILE)) {
         try {
-            db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+            localDb = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
         } catch (e) {
             console.error("Failed to load DB", e);
-            db = {};
+            localDb = {};
         }
     }
 };
-loadDb();
+if (!MONGODB_URI) loadLocalDb();
 
-const saveDb = () => {
+const saveLocalDb = () => {
     try {
-        fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+        fs.writeFileSync(DB_FILE, JSON.stringify(localDb, null, 2));
     } catch (e) {
         console.error("Failed to save DB", e);
     }
@@ -149,21 +190,62 @@ app.get('/api/tts', async (req, res) => {
 const XP_ACTIONS = { SEARCH: 15, SUMMARY: 30, SHARE: 50, DAILY_VISIT: 100 };
 const INITIAL_STATS = { xp: 0, level: 1, wordsDiscovered: 0, summariesGenerated: 0, shares: 0, lastVisit: 0, currentStreak: 1, badges: [] };
 
-app.get('/api/gamification', (req, res) => {
+app.get('/api/gamification', async (req, res) => {
     const { userId, name, photo } = req.query;
     if (!userId) return res.status(400).json({ error: "userId required" });
-
     const idStr = userId.toString();
-    
-    let userData = db[idStr] || { 
+
+    let stats;
+    let userData;
+
+    // --- MONGO PATH ---
+    if (useMongo && User) {
+        try {
+            let user = await User.findOne({ userId: idStr });
+            if (!user) {
+                user = await User.create({
+                    userId: idStr,
+                    profile: { name: name || 'Explorer', photo: photo || '' },
+                    stats: { ...INITIAL_STATS }
+                });
+            } else if (name || photo) {
+                if(name) user.profile.name = name;
+                if(photo) user.profile.photo = photo;
+            }
+
+            // Streak Logic (Duplicated for server.js environment)
+            const last = new Date(user.stats.lastVisit);
+            const now = new Date();
+            const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
+            
+            if (!isSameDay) {
+                const diffTime = Math.abs(now.getTime() - last.getTime());
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+                if (diffDays <= 2) {
+                    user.stats.currentStreak += 1;
+                    user.stats.xp += XP_ACTIONS.DAILY_VISIT;
+                } else {
+                    user.stats.currentStreak = 1;
+                }
+                user.stats.lastVisit = Date.now();
+                await user.save();
+            }
+            return res.json(user.stats);
+        } catch(e) {
+            console.error("Mongo Error", e);
+            return res.status(500).json({error: "DB Error"});
+        }
+    }
+
+    // --- LOCAL FILE PATH ---
+    userData = localDb[idStr] || { 
         stats: { ...INITIAL_STATS, lastVisit: Date.now() },
         profile: { name: name || 'Explorer', photo: photo || '' }
     };
-
     if (name) userData.profile.name = name;
     if (photo) userData.profile.photo = photo;
 
-    let stats = userData.stats;
+    stats = userData.stats;
     const last = new Date(stats.lastVisit);
     const now = new Date();
     const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
@@ -178,62 +260,119 @@ app.get('/api/gamification', (req, res) => {
             stats.currentStreak = 1;
         }
         stats.lastVisit = Date.now();
-    } else if (stats.lastVisit === 0) {
-        stats.lastVisit = Date.now();
     }
-
     userData.stats = stats;
-    db[idStr] = userData;
-    saveDb();
-
+    localDb[idStr] = userData;
+    saveLocalDb();
     res.json(stats);
 });
 
-app.post('/api/gamification', (req, res) => {
+app.post('/api/gamification', async (req, res) => {
     const { userId, action, name, photo, stats: syncedStats } = req.body;
-    
     if (!action) return res.status(400).json({ error: "Missing action" });
 
+    // --- LEADERBOARD ---
     if (action === 'LEADERBOARD') {
-        if (userId && syncedStats) {
-             const idStr = userId.toString();
-             let existing = db[idStr];
-             // Ensure user exists or update if local stats are better
-             if (!existing || (syncedStats.xp > (existing.stats?.xp || 0))) {
-                 db[idStr] = {
-                     stats: syncedStats,
-                     profile: { name: name || 'Explorer', photo: photo || '' }
-                 };
-                 saveDb();
-             }
-        }
+        let leaderboard = [];
         
-        const users = Object.keys(db).map(key => ({
-            userId: key,
-            ...db[key].profile,
-            ...db[key].stats
-        }));
-
-        const leaderboard = users
-            .sort((a, b) => b.xp - a.xp)
-            .slice(0, 50)
-            .map((u, index) => ({
-                userId: u.userId,
-                name: u.name || 'Explorer',
-                photoUrl: u.photoUrl || '',
-                xp: u.xp,
-                level: u.level,
-                rank: index + 1,
-                badges: u.badges.length
-            }));
+        if (useMongo && User) {
+             if (userId) {
+                await User.findOneAndUpdate(
+                    { userId: userId.toString() },
+                    { 
+                        $set: { 'profile.name': name || 'Explorer', 'profile.photo': photo || '' },
+                        ...(syncedStats ? { $max: { 'stats.xp': syncedStats.xp } } : {})
+                    },
+                    { upsert: true, new: true, setDefaultsOnInsert: true }
+                );
+             }
+             const users = await User.find({}).sort({ 'stats.xp': -1 }).limit(50);
+             leaderboard = users.map((u, index) => ({
+                 userId: u.userId,
+                 name: u.profile.name,
+                 photoUrl: u.profile.photo,
+                 xp: u.stats.xp,
+                 level: u.stats.level,
+                 rank: index + 1,
+                 badges: u.stats.badges.length
+             }));
+        } else {
+             // Local Fallback
+             if (userId && syncedStats) {
+                 const idStr = userId.toString();
+                 let existing = localDb[idStr];
+                 if (!existing || (syncedStats.xp > (existing.stats?.xp || 0))) {
+                     localDb[idStr] = {
+                         stats: syncedStats,
+                         profile: { name: name || 'Explorer', photo: photo || '' }
+                     };
+                     saveLocalDb();
+                 }
+             }
+             const users = Object.keys(localDb).map(key => ({ userId: key, ...localDb[key].profile, ...localDb[key].stats }));
+             leaderboard = users.sort((a, b) => b.xp - a.xp).slice(0, 50).map((u, index) => ({
+                 userId: u.userId,
+                 name: u.name || 'Explorer',
+                 photoUrl: u.photoUrl || '',
+                 xp: u.xp,
+                 level: u.level,
+                 rank: index + 1,
+                 badges: u.badges.length
+             }));
+        }
         return res.json(leaderboard);
     }
 
-    // Standard Actions
     if (!userId) return res.status(400).json({ error: "userId required" });
     const idStr = userId.toString();
 
-    let userData = db[idStr] || { stats: { ...INITIAL_STATS }, profile: { name: 'Unknown', photo: '' } };
+    // --- MONGO UPDATE ---
+    if (useMongo && User) {
+        try {
+            let user = await User.findOne({ userId: idStr });
+            if (!user) {
+                user = new User({
+                    userId: idStr,
+                    profile: { name: name || 'Explorer', photo: photo || '' },
+                    stats: { ...INITIAL_STATS }
+                });
+            }
+            
+            const stats = user.stats;
+            const previousLevel = stats.level;
+            stats.xp += (XP_ACTIONS[action] || 0);
+            if (action === 'SEARCH') stats.wordsDiscovered++;
+            if (action === 'SUMMARY') stats.summariesGenerated++;
+            if (action === 'SHARE') stats.shares++;
+            stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
+            
+            // Badge Logic
+            const newBadges = [];
+            const addBadge = (id, condition) => {
+                if (condition && !stats.badges.includes(id)) {
+                    stats.badges.push(id);
+                    newBadges.push(id);
+                }
+            };
+            addBadge('first_search', stats.wordsDiscovered >= 1);
+            addBadge('explorer_10', stats.wordsDiscovered >= 10);
+            addBadge('linguist_50', stats.wordsDiscovered >= 50);
+            addBadge('deep_diver', stats.summariesGenerated >= 5);
+            addBadge('social_butterfly', stats.shares >= 3);
+            addBadge('daily_streak_3', stats.currentStreak >= 3);
+            
+            stats.lastVisit = Date.now();
+            await user.save();
+            
+            return res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });
+        } catch(e) {
+            console.error(e);
+            return res.status(500).json({error: "DB Error"});
+        }
+    }
+
+    // --- LOCAL FALLBACK ---
+    let userData = localDb[idStr] || { stats: { ...INITIAL_STATS }, profile: { name: 'Unknown', photo: '' } };
     let stats = userData.stats;
     const newBadges = [];
     const previousLevel = stats.level;
@@ -242,7 +381,6 @@ app.post('/api/gamification', (req, res) => {
     if (action === 'SEARCH') stats.wordsDiscovered++;
     if (action === 'SUMMARY') stats.summariesGenerated++;
     if (action === 'SHARE') stats.shares++;
-
     stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
 
     const addBadge = (id, condition) => {
@@ -259,8 +397,8 @@ app.post('/api/gamification', (req, res) => {
     addBadge('daily_streak_3', stats.currentStreak >= 3);
 
     stats.lastVisit = Date.now();
-    db[idStr] = userData;
-    saveDb();
+    localDb[idStr] = userData;
+    saveLocalDb();
 
     res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });
 });

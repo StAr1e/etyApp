@@ -1,15 +1,12 @@
-// This handler simulates a database connection for Vercel Serverless environment.
-// In a real scenario, this would connect to MongoDB/Postgres.
+import { connectToDatabase, User } from '../lib/mongodb';
 
-const XP_ACTIONS = {
+// --- CONSTANTS ---
+const XP_ACTIONS: Record<string, number> = {
   SEARCH: 15,
   SUMMARY: 30,
   SHARE: 50,
   DAILY_VISIT: 100
 };
-
-// In-Memory Fallback for Serverless (Note: This resets on cold start)
-const memDb = new Map<string, any>();
 
 const INITIAL_STATS = {
   xp: 0,
@@ -22,104 +19,157 @@ const INITIAL_STATS = {
   badges: []
 };
 
+// Helper to calculate streak
+const updateStreak = (stats: any) => {
+  const last = new Date(stats.lastVisit);
+  const now = new Date();
+  const isSameDay = last.getDate() === now.getDate() && 
+                    last.getMonth() === now.getMonth() && 
+                    last.getFullYear() === now.getFullYear();
+
+  let xpGained = 0;
+
+  if (!isSameDay) {
+    const diffTime = Math.abs(now.getTime() - last.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+    
+    // Check if consecutive day (1 day difference roughly, allowing for 48h window logic)
+    if (diffDays <= 2) {
+      stats.currentStreak = (stats.currentStreak || 0) + 1;
+      stats.xp = (stats.xp || 0) + XP_ACTIONS.DAILY_VISIT;
+      xpGained = XP_ACTIONS.DAILY_VISIT;
+    } else {
+      stats.currentStreak = 1;
+    }
+    stats.lastVisit = Date.now();
+  }
+  return xpGained;
+};
+
+// Helper to check badges
+const checkBadges = (stats: any) => {
+  const newBadges: string[] = [];
+  
+  const addBadge = (id: string, condition: boolean) => {
+    if (condition && !stats.badges.includes(id)) {
+      stats.badges.push(id);
+      newBadges.push(id);
+    }
+  };
+
+  addBadge('first_search', stats.wordsDiscovered >= 1);
+  addBadge('explorer_10', stats.wordsDiscovered >= 10);
+  addBadge('linguist_50', stats.wordsDiscovered >= 50);
+  addBadge('deep_diver', stats.summariesGenerated >= 5);
+  addBadge('social_butterfly', stats.shares >= 3);
+  addBadge('daily_streak_3', stats.currentStreak >= 3);
+
+  return newBadges;
+};
+
 export default async function handler(request: any, response: any) {
   try {
+    const db = await connectToDatabase();
+    
+    if (!db) {
+       // Fallback for when DB isn't configured - mostly for avoiding crashes, 
+       // but stats won't persist across restarts.
+       return response.status(503).json({ error: "Database not configured (MONGODB_URI missing)" });
+    }
+
+    // --- GET STATS ---
     if (request.method === 'GET') {
       const { userId, name, photo } = request.query;
       if (!userId) return response.status(400).json({ error: "userId required" });
       
-      let userData = memDb.get(userId.toString());
+      const idStr = userId.toString();
+
+      // Find or Create
+      let user = await User.findOne({ userId: idStr });
       
-      if (!userData) {
-          userData = { 
-            userId,
-            profile: { name: name || 'Explorer', photo: photo || '' },
-            stats: { ...INITIAL_STATS } 
-          };
+      if (!user) {
+        user = await User.create({
+          userId: idStr,
+          profile: { name: name || 'Explorer', photo: photo || '' },
+          stats: { ...INITIAL_STATS }
+        });
       } else {
-          // Update profile if provided
-          if (name) userData.profile.name = name;
-          if (photo) userData.profile.photo = photo;
-      }
-      
-      let stats = userData.stats;
-
-      // Daily Streak Logic
-      const last = new Date(stats.lastVisit);
-      const now = new Date();
-      const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
-      
-      if (!isSameDay) {
-          const diffTime = Math.abs(now.getTime() - last.getTime());
-          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-          if (diffDays <= 2) {
-             stats.currentStreak += 1;
-             stats.xp += XP_ACTIONS.DAILY_VISIT;
-          } else {
-             stats.currentStreak = 1;
-          }
-          stats.lastVisit = Date.now();
+        // Update profile info if changed
+        if (name) user.profile.name = name;
+        if (photo) user.profile.photo = photo;
       }
 
-      memDb.set(userId.toString(), userData);
-      return response.status(200).json(stats);
+      // Check Streak
+      const streakXp = updateStreak(user.stats);
+      if (streakXp > 0 || name || photo) {
+        await user.save();
+      }
+
+      return response.status(200).json(user.stats);
     }
 
+    // --- POST ACTIONS ---
     if (request.method === 'POST') {
       const { userId, action, name, photo, stats: syncedStats } = request.body;
-      
       if (!action) return response.status(400).json({ error: "Missing action" });
 
-      // --- ACTION: LEADERBOARD ---
-      // This is a special action that merges the requesting user into the DB
-      // before returning the list, ensuring the user always sees themselves.
+      // --- LEADERBOARD ACTION ---
       if (action === 'LEADERBOARD') {
-        if (userId && syncedStats) {
-           const idStr = userId.toString();
-           let existing = memDb.get(idStr);
-           
-           // If user missing from memory, or client has newer stats (syncedStats.xp > existing), update/insert
-           if (!existing || (syncedStats.xp > (existing.stats?.xp || 0))) {
-              memDb.set(idStr, {
-                 userId,
-                 profile: { name: name || 'Explorer', photo: photo || '' },
-                 stats: syncedStats
-              });
-           }
+        if (userId) {
+          const idStr = userId.toString();
+          // Ensure requesting user exists/is updated
+          await User.findOneAndUpdate(
+            { userId: idStr },
+            { 
+              $set: { 
+                 'profile.name': name || 'Explorer',
+                 'profile.photo': photo || '' 
+              },
+              // If client has better XP (rare sync issue), take it, otherwise ignore
+              ...(syncedStats ? { 
+                 $max: { 'stats.xp': syncedStats.xp } 
+              } : {})
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+          );
         }
-        
-        // Generate List
-        const users = Array.from(memDb.values());
-        const leaderboard = users
-          .sort((a, b) => (b.stats?.xp || 0) - (a.stats?.xp || 0))
-          .slice(0, 50)
-          .map((u, index) => ({
-              userId: u.userId,
-              name: u.profile?.name || 'Explorer',
-              photoUrl: u.profile?.photo || '',
-              xp: u.stats?.xp || 0,
-              level: u.stats?.level || 1,
-              rank: index + 1,
-              badges: u.stats?.badges?.length || 0
-          }));
+
+        // Get Top 50
+        const topUsers = await User.find({})
+          .sort({ 'stats.xp': -1 })
+          .limit(50)
+          .select('userId profile stats');
+
+        const leaderboard = topUsers.map((u: any, index: number) => ({
+          userId: u.userId,
+          name: u.profile.name,
+          photoUrl: u.profile.photo,
+          xp: u.stats.xp,
+          level: u.stats.level,
+          rank: index + 1,
+          badges: u.stats.badges.length
+        }));
 
         return response.status(200).json(leaderboard);
       }
 
-      // --- STANDARD ACTIONS ---
+      // --- STANDARD GAMIFICATION ACTIONS ---
       if (!userId) return response.status(400).json({ error: "userId required" });
+      const idStr = userId.toString();
 
-      let userData = memDb.get(userId.toString());
-      if (!userData) {
-          userData = { userId, profile: { name: 'Unknown', photo: '' }, stats: { ...INITIAL_STATS } };
+      let user = await User.findOne({ userId: idStr });
+      if (!user) {
+         user = new User({
+           userId: idStr,
+           profile: { name: name || 'Explorer', photo: photo || '' },
+           stats: { ...INITIAL_STATS }
+         });
       }
 
-      let stats = userData.stats;
-      const newBadges: string[] = [];
+      const stats = user.stats;
       const previousLevel = stats.level;
 
-      // Logic
-      // @ts-ignore
+      // Apply Action XP
       const xpGain = XP_ACTIONS[action] || 0;
       stats.xp += xpGain;
 
@@ -127,24 +177,16 @@ export default async function handler(request: any, response: any) {
       if (action === 'SUMMARY') stats.summariesGenerated++;
       if (action === 'SHARE') stats.shares++;
 
+      // Recalculate Level
       stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
 
-      const addBadge = (id: string, condition: boolean) => {
-        if (condition && !stats.badges.includes(id)) {
-          stats.badges.push(id);
-          newBadges.push(id);
-        }
-      };
-
-      addBadge('first_search', stats.wordsDiscovered >= 1);
-      addBadge('explorer_10', stats.wordsDiscovered >= 10);
-      addBadge('linguist_50', stats.wordsDiscovered >= 50);
-      addBadge('deep_diver', stats.summariesGenerated >= 5);
-      addBadge('social_butterfly', stats.shares >= 3);
-      addBadge('daily_streak_3', stats.currentStreak >= 3);
+      // Check Badges
+      const newBadges = checkBadges(stats);
       
       stats.lastVisit = Date.now();
-      memDb.set(userId.toString(), userData);
+      
+      // Save
+      await user.save();
 
       return response.status(200).json({
          stats,
