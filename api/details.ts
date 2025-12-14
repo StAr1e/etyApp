@@ -80,6 +80,13 @@ export default async function handler(request: any, response: any) {
 
   } catch (error: any) {
     console.error("Critical API Error:", error);
+
+    // Specific Quota Error Handling
+    const msg = error.message?.toLowerCase() || "";
+    if (error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
+       return response.status(429).json({ error: "Daily AI usage limit reached. Please try again tomorrow!" });
+    }
+
     // Ensure we send JSON even on crash
     return response.status(500).json({ 
         error: error.message || "Internal Server Error",

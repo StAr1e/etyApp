@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
 import { WordData } from '../types';
 
@@ -60,6 +61,9 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
       return JSON.parse(response.text!) as WordData;
     } catch (e: any) {
       console.error("Local Dev Error:", e);
+      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
+        throw new Error("Daily AI usage limit reached. Please try again tomorrow!");
+      }
       throw new Error(`Local Dev Error: ${e.message}`);
     }
   }
@@ -68,6 +72,11 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
   try {
     const response = await fetch(`/api/details?word=${encodeURIComponent(word)}`);
     
+    // Check quota before anything else
+    if (response.status === 429) {
+       throw new Error("Daily AI usage limit reached. Please try again tomorrow!");
+    }
+
     // CRITICAL CHECK: Ensure we got JSON, not the HTML index page
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
@@ -101,11 +110,18 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
         contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
       });
       return response.text || "No summary available.";
-    } catch (e) { return "Local Dev Summary Error"; }
+    } catch (e: any) { 
+        if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
+            return "Daily AI usage limit reached.";
+        }
+        return "Local Dev Summary Error"; 
+    }
   }
 
   try {
     const response = await fetch(`/api/summary?word=${encodeURIComponent(word)}`);
+    if (response.status === 429) return "Daily AI usage limit reached. Please try again tomorrow.";
+    
     if (!response.ok) throw new Error("Failed to fetch summary");
     const data = await response.json();
     return data.summary || "Could not generate summary.";
@@ -133,6 +149,8 @@ export const fetchPronunciation = async (text: string): Promise<ArrayBuffer | nu
 
   try {
     const response = await fetch(`/api/tts?text=${encodeURIComponent(text)}`);
+    if (response.status === 429) return null; 
+    
     if (!response.ok) return null;
     const data = await response.json();
     if (data.audio) return decodeAudio(data.audio);

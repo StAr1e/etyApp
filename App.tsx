@@ -3,7 +3,7 @@ import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
 import { WordData, SearchHistoryItem, TelegramUser } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -171,6 +171,8 @@ export default function App() {
     };
   }, [view, showSummaryModal, handleGenerateSummary, handleBack]);
 
+  const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
+
   return (
     <div className="min-h-screen bg-tg-bg text-tg-text font-sans p-4 md:p-8 relative overflow-x-hidden">
       
@@ -245,12 +247,16 @@ export default function App() {
 
           {/* Error State */}
           {error && (
-            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl flex items-start gap-3 border border-red-200 dark:border-red-800/30">
-              <AlertTriangle className="shrink-0 mt-0.5" size={20} />
+            <div className={`mt-6 p-4 rounded-xl flex items-start gap-3 border ${
+                isQuotaError 
+                 ? "bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-800/30" 
+                 : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800/30"
+            }`}>
+              {isQuotaError ? <CloudOff className="shrink-0 mt-0.5" size={20} /> : <AlertTriangle className="shrink-0 mt-0.5" size={20} />}
               <div>
-                 <p className="font-bold text-sm mb-1">Connection Error</p>
+                 <p className="font-bold text-sm mb-1">{isQuotaError ? "Daily Limit Reached" : "Connection Error"}</p>
                  <p className="text-sm opacity-90 leading-relaxed">{error}</p>
-                 {error.includes("API Key missing") && (
+                 {!isQuotaError && error.includes("API Key missing") && (
                    <p className="text-xs mt-2 font-mono bg-black/10 p-2 rounded">
                      Fix: Add GEMINI_API_KEY to Vercel Environment Variables.
                    </p>

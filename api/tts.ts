@@ -39,6 +39,12 @@ export default async function handler(request: any, response: any) {
 
   } catch (error: any) {
     console.error("API Error:", error);
+    
+    const msg = error.message?.toLowerCase() || "";
+    if (error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
+       return response.status(429).json({ error: "Daily AI usage limit reached." });
+    }
+
     return response.status(500).json({ error: error.message || "Failed to generate audio" });
   }
 }
