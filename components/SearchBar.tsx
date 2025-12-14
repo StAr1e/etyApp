@@ -1,6 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, ArrowRight, CornerDownLeft } from 'lucide-react';
-import { SearchHistoryItem } from '../types';
+import { SearchHistoryItem } from '../types.ts';
 
 interface SearchBarProps {
   onSearch: (term: string) => void;
@@ -13,6 +14,11 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
   const [query, setQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Filter history based on input
+  const filteredHistory = query 
+    ? history.filter(item => item.word.toLowerCase().includes(query.toLowerCase())).slice(0, 5) // Top 5 matches
+    : history;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,16 +78,21 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
       </form>
 
       {/* Dropdown Suggestions / History */}
-      {isFocused && (history.length > 0 || query) && (
-        <div className="absolute top-full left-0 right-0 mt-3 bg-tg-bg/95 backdrop-blur-xl shadow-2xl rounded-2xl border border-tg-hint/10 p-2 max-h-[60vh] overflow-y-auto animate-in fade-in slide-in-from-top-2 z-20">
-          {history.length > 0 && !query && (
+      {isFocused && (filteredHistory.length > 0 || query) && (
+        <div className="absolute top-full left-0 right-0 mt-3 bg-tg-bg/95 backdrop-blur-xl shadow-2xl rounded-2xl border border-tg-hint/10 p-2 max-h-[60vh] overflow-y-auto animate-in fade-in slide-in-from-top-2 z-20 no-scrollbar">
+          
+          {/* History List (Matches or Recent) */}
+          {filteredHistory.length > 0 && (
             <div className="md:px-1">
                <div className="flex items-center justify-between text-tg-hint text-xs font-bold uppercase tracking-wider mb-2 mt-2 px-3">
-                 <span className="flex items-center gap-1.5"><Clock size={12} /> Recent</span>
-                 <span className="text-[10px] opacity-60">History</span>
+                 <span className="flex items-center gap-1.5">
+                    {query ? <Search size={12} /> : <Clock size={12} />} 
+                    {query ? 'History Matches' : 'Recent'}
+                 </span>
+                 {!query && <span className="text-[10px] opacity-60">History</span>}
                </div>
                <div className="space-y-1">
-                 {history.map((item) => (
+                 {filteredHistory.map((item) => (
                    <button
                      key={item.timestamp}
                      onClick={(e) => {
@@ -100,6 +111,12 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
             </div>
           )}
           
+          {/* Divider if we have both history matches and a generic search button */}
+          {filteredHistory.length > 0 && query && (
+             <div className="h-px bg-tg-hint/10 my-2 mx-2"></div>
+          )}
+          
+          {/* Generic Search Action */}
           {query && (
              <button
                onClick={handleSubmit}
@@ -107,7 +124,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
              >
                <span className="flex items-center gap-2">
                  {isLoading ? <span className="animate-spin">⏳</span> : <Search size={18} />}
-                 Search for "{query}"
+                 Search API for "{query}"
                </span>
                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
              </button>

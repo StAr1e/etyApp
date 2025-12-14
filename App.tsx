@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
@@ -127,10 +128,11 @@ export default function App() {
       setView('result');
       if(user) handleGamificationAction('SEARCH'); 
 
+      // Update History: Filter out duplicate, add new to top, slice to 50
       const newHistory = [
         { word: data.word, timestamp: Date.now() },
         ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
-      ].slice(0, 10); 
+      ].slice(0, 50); 
       
       setHistory(newHistory);
       localStorage.setItem('ety_history', JSON.stringify(newHistory));
