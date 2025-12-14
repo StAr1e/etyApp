@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
-import { WordData } from '../types';
+import { WordData } from '../types.ts';
 
 // Fix for missing types in current environment
 declare global {

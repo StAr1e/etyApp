@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
-import { WordData, SearchHistoryItem, TelegramUser } from './types';
+import { ProfileModal } from './components/ProfileModal';
+import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types.ts';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff } from 'lucide-react';
+import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -12,6 +14,11 @@ export default function App() {
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
   const [view, setView] = useState<'home' | 'result'>('home');
   const [user, setUser] = useState<TelegramUser | null>(null);
+  
+  // Gamification State
+  const [userStats, setUserStats] = useState<UserStats>(INITIAL_STATS);
+  const [showProfile, setShowProfile] = useState(false);
+  const [levelUpToast, setLevelUpToast] = useState<{show: boolean, level: number}>({show: false, level: 0});
   
   // Summary State
   const [summary, setSummary] = useState<string | null>(null);
@@ -22,11 +29,36 @@ export default function App() {
 
   // --- Handlers ---
 
+  const handleGamificationAction = async (action: 'SEARCH' | 'SUMMARY' | 'SHARE') => {
+    if (!user) return; // Cannot track if no user ID
+
+    // Optimistic update could happen here, but for now we wait for server response
+    const { stats, newBadges } = await trackAction(user.id, action);
+    
+    // Check for level up
+    if (stats.level > userStats.level) {
+      setLevelUpToast({ show: true, level: stats.level });
+      setTimeout(() => setLevelUpToast({ show: false, level: 0 }), 4000);
+      if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+    }
+    
+    // Show badge toast 
+    if (newBadges.length > 0) {
+      if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+    }
+
+    setUserStats(stats);
+  };
+
   const handleLogin = () => {
     if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
       setUser(window.Telegram.WebApp.initDataUnsafe.user);
     } else {
       console.warn("User data not available. Please open this app within Telegram.");
+      // Dev mock user if needed
+      if (import.meta.env.DEV) {
+          setUser({ id: 12345, first_name: "TestUser" } as TelegramUser);
+      }
     }
   };
 
@@ -37,13 +69,18 @@ export default function App() {
        return;
      }
 
+     if (showProfile) {
+       setShowProfile(false);
+       return;
+     }
+
      setView('home');
      setWordData(null);
      setSummary(null);
      if (window.Telegram?.WebApp) {
        window.Telegram.WebApp.HapticFeedback.selectionChanged();
      }
-  }, [showSummaryModal]);
+  }, [showSummaryModal, showProfile]);
 
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
@@ -57,13 +94,15 @@ export default function App() {
       const text = await fetchWordSummary(wordData.word);
       setSummary(text);
       setShowSummaryModal(true);
+      if(user) handleGamificationAction('SUMMARY'); 
+      
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hide();
     } catch (e) {
       console.error(e);
     } finally {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
-  }, [wordData]);
+  }, [wordData, user, userStats]); // dependencies
 
   const handleSearch = async (term: string) => {
     if (!term) return;
@@ -78,7 +117,8 @@ export default function App() {
       const data = await fetchWordDetails(term);
       setWordData(data);
       setView('result');
-      
+      if(user) handleGamificationAction('SEARCH'); 
+
       const newHistory = [
         { word: data.word, timestamp: Date.now() },
         ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
@@ -137,6 +177,13 @@ export default function App() {
 
   }, []);
 
+  // Fetch Stats when User is Identified
+  useEffect(() => {
+    if (user) {
+        fetchUserStats(user.id).then(setUserStats);
+    }
+  }, [user]);
+
   // Manage Native Buttons State
   useEffect(() => {
     if (!window.Telegram?.WebApp) return;
@@ -145,7 +192,7 @@ export default function App() {
     const onMainBtnClick = () => handleGenerateSummary();
     const onBackBtnClick = () => handleBack();
 
-    if (view === 'result') {
+    if (view === 'result' && !showProfile) {
       tg.BackButton.show();
       tg.BackButton.onClick(onBackBtnClick);
 
@@ -156,6 +203,10 @@ export default function App() {
         tg.MainButton.hide();
       }
 
+    } else if (showProfile) {
+       tg.BackButton.show();
+       tg.BackButton.onClick(onBackBtnClick);
+       tg.MainButton.hide();
     } else {
       tg.BackButton.hide();
       tg.MainButton.hide();
@@ -167,9 +218,11 @@ export default function App() {
       tg.MainButton.offClick(onMainBtnClick);
       tg.BackButton.offClick(onBackBtnClick);
     };
-  }, [view, showSummaryModal, handleGenerateSummary, handleBack]);
+  }, [view, showSummaryModal, showProfile, handleGenerateSummary, handleBack]);
 
   const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
+  const levelInfo = getLevelInfo(userStats.xp);
+  const nextLevelProgress = ((userStats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100;
 
   return (
     <div className="min-h-screen bg-tg-bg text-tg-text font-sans relative overflow-x-hidden selection:bg-tg-button selection:text-white">
@@ -181,15 +234,31 @@ export default function App() {
       {/* Content Container */}
       <div className="w-full max-w-2xl mx-auto relative z-10 min-h-screen flex flex-col p-4 md:p-6">
         
-        {/* Top Bar / Login Area */}
+        {/* Top Bar: Profile & Gamification */}
         <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
-           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              Online
-           </div>
+           
+           {/* Level / XP Bar */}
+           <button onClick={() => setShowProfile(true)} className="flex items-center gap-3 group">
+              <div className="relative">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-tg-button to-purple-500 flex items-center justify-center text-white font-bold shadow-lg border-2 border-tg-bg">
+                   {userStats.level}
+                </div>
+                {userStats.badges.length > 0 && (
+                   <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-yellow-900 p-0.5 rounded-full border border-tg-bg">
+                      <Crown size={10} fill="currentColor" />
+                   </div>
+                )}
+              </div>
+              <div className="flex flex-col items-start">
+                 <span className="text-xs font-bold text-tg-text group-hover:text-tg-button transition-colors">{levelInfo.title}</span>
+                 <div className="w-24 h-1.5 bg-tg-secondaryBg rounded-full mt-1 overflow-hidden">
+                    <div className="h-full bg-tg-button rounded-full transition-all duration-500" style={{ width: `${nextLevelProgress}%` }}></div>
+                 </div>
+              </div>
+           </button>
            
            {user ? (
-             <div className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-default backdrop-blur-md bg-opacity-80">
+             <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-pointer hover:bg-tg-button/5 transition-colors backdrop-blur-md bg-opacity-80">
                {user.photo_url ? (
                  <img src={user.photo_url} alt="Profile" className="w-6 h-6 rounded-full ring-2 ring-white dark:ring-black" />
                ) : (
@@ -198,7 +267,7 @@ export default function App() {
                  </div>
                )}
                <span className="text-sm font-semibold text-tg-text truncate max-w-[100px]">{user.first_name}</span>
-             </div>
+             </button>
            ) : (
              <button 
                onClick={handleLogin}
@@ -291,7 +360,7 @@ export default function App() {
                   </button>
                 )}
                 
-                <WordCard data={wordData} />
+                <WordCard data={wordData} onShare={() => user && handleGamificationAction('SHARE')} />
                 
                 {!window.Telegram?.WebApp && (
                    <button 
@@ -306,6 +375,16 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Level Up Toast */}
+      {levelUpToast.show && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top duration-500">
+           <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 font-bold border-2 border-white/30">
+              <Trophy size={20} className="animate-bounce" />
+              <span>Level Up! Rank {levelUpToast.level} Achieved!</span>
+           </div>
+        </div>
+      )}
 
       {/* Summary Modal */}
       {showSummaryModal && summary && (
@@ -344,6 +423,11 @@ export default function App() {
               </div>
            </div>
         </div>
+      )}
+
+      {/* Profile Modal */}
+      {showProfile && (
+        <ProfileModal stats={userStats} onClose={() => setShowProfile(false)} />
       )}
     </div>
   );

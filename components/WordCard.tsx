@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { WordData, TelegramWebApp } from '../types';
+import { WordData, TelegramWebApp } from '../types.ts';
 import { Play, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck } from 'lucide-react';
 import { fetchPronunciation } from '../services/geminiService';
 
 interface WordCardProps {
   data: WordData;
+  onShare?: () => void;
 }
 
-export const WordCard: React.FC<WordCardProps> = ({ data }) => {
+export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -40,6 +41,9 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
   };
 
   const handleShare = () => {
+    // Award XP
+    if (onShare) onShare();
+
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp as TelegramWebApp;
       tg.HapticFeedback.impactOccurred('medium');

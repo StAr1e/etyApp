@@ -21,6 +21,39 @@ export interface SearchHistoryItem {
   timestamp: number;
 }
 
+// --- Gamification Types ---
+
+export type BadgeId = 'first_search' | 'explorer_10' | 'linguist_50' | 'deep_diver' | 'social_butterfly' | 'daily_streak_3';
+
+export interface Badge {
+  id: BadgeId;
+  name: string;
+  description: string;
+  icon: string;
+  color: string;
+  unlockedAt?: number;
+}
+
+export interface UserStats {
+  xp: number;
+  level: number;
+  wordsDiscovered: number;
+  summariesGenerated: number;
+  shares: number;
+  lastVisit: number;
+  currentStreak: number;
+  badges: BadgeId[];
+}
+
+export interface LevelInfo {
+  level: number;
+  title: string;
+  minXP: number;
+  nextLevelXP: number;
+}
+
+// --- Telegram Types ---
+
 export interface TelegramBackButton {
   isVisible: boolean;
   onClick: (callback: () => void) => void;
@@ -57,11 +90,11 @@ export interface TelegramUser {
   photo_url?: string;
 }
 
-// Minimal definition for Telegram WebApp
 export interface TelegramWebApp {
   initData: string;
   initDataUnsafe: {
     user?: TelegramUser;
+    start_param?: string;
     [key: string]: any;
   };
   version: string;
@@ -73,11 +106,16 @@ export interface TelegramWebApp {
   BackButton: TelegramBackButton;
   MainButton: TelegramMainButton;
   switchInlineQuery: (query: string, choose_chat_types?: string[]) => void;
+  openLink: (url: string, options?: { try_instant_view?: boolean }) => void;
+  openTelegramLink?: (url: string) => void;
   HapticFeedback: {
     impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
     notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
     selectionChanged: () => void;
   };
+  isVersionAtLeast: (version: string) => boolean;
+  setHeaderColor: (color: string) => void;
+  setBackgroundColor: (color: string) => void;
 }
 
 declare global {
