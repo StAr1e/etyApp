@@ -3,7 +3,7 @@ import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
 import { WordData, SearchHistoryItem, TelegramUser } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
-import { Sparkles, X, Wand2, User as UserIcon } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -160,8 +160,10 @@ export default function App() {
       setHistory(newHistory);
       localStorage.setItem('ety_history', JSON.stringify(newHistory));
 
-    } catch (err) {
-      setError("Could not find etymology for this word. Please try another.");
+    } catch (err: any) {
+      console.error(err);
+      // Ensure we display the real error message
+      setError(err.message || "An unexpected error occurred.");
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('error');
     } finally {
       setIsLoading(false);
@@ -176,7 +178,7 @@ export default function App() {
         
         {/* Top Bar / Login Area */}
         <div className={`absolute top-0 left-0 right-0 flex justify-between items-center z-20 transition-opacity ${view === 'result' ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
-           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider">v1.0</div>
+           <div className="text-xs font-bold text-tg-hint uppercase tracking-wider">v1.2</div>
            
            {user ? (
              <div className="flex items-center gap-2 bg-tg-secondaryBg pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-default">
@@ -232,8 +234,17 @@ export default function App() {
 
           {/* Error State */}
           {error && (
-            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl text-center">
-              {error}
+            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl flex items-start gap-3 border border-red-200 dark:border-red-800/30">
+              <AlertTriangle className="shrink-0 mt-0.5" size={20} />
+              <div>
+                 <p className="font-bold text-sm mb-1">Connection Error</p>
+                 <p className="text-sm opacity-90 leading-relaxed">{error}</p>
+                 {error.includes("API Key missing") && (
+                   <p className="text-xs mt-2 font-mono bg-black/10 p-2 rounded">
+                     Fix: Add GEMINI_API_KEY to Vercel Environment Variables.
+                   </p>
+                 )}
+              </div>
             </div>
           )}
 

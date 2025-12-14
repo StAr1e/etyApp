@@ -68,29 +68,26 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
   try {
     const response = await fetch(`/api/details?word=${encodeURIComponent(word)}`);
     
-    // Handle HTTP Errors
+    // CRITICAL CHECK: Ensure we got JSON, not the HTML index page
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+       const text = await response.text();
+       // If we got HTML, it means the API route failed and Vercel served the 404/index page
+       if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
+          throw new Error("API Route Missing: Please check Vercel logs/deployment.");
+       }
+       throw new Error(`Server returned non-JSON response (${response.status})`);
+    }
+
     if (!response.ok) {
-      const contentType = response.headers.get("content-type");
-      if (contentType && contentType.includes("application/json")) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server Error (${response.status})`);
-      } else {
-        const text = await response.text();
-        console.error("API HTML Error:", text);
-        throw new Error(`API Endpoint Failed (${response.status}).`);
-      }
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Server Error (${response.status})`);
     }
 
     const data = await response.json();
     return data as WordData;
   } catch (error: any) {
     console.error("Error fetching word details:", error);
-    
-    // Detect "ECONNREFUSED" equivalent in fetch (Network Error)
-    if (error.message && (error.message.includes("Failed to fetch") || error.message.includes("NetworkError"))) {
-      throw new Error("Backend offline. Please run 'npm run server' in a separate terminal.");
-    }
-    
     throw new Error(error.message || "Failed to fetch word details");
   }
 };
