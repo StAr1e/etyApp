@@ -13,7 +13,6 @@ const decodeAudio = (base64: string): ArrayBuffer => {
 };
 
 // --- SHARED PROMPTS & SCHEMAS ---
-// We define these here so we can use them for Local Dev (Client-side) calls
 const WORD_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -44,7 +43,7 @@ const WORD_SCHEMA: Schema = {
 // --- FETCH FUNCTIONS ---
 
 export const fetchWordDetails = async (word: string): Promise<WordData> => {
-  // HYBRID MODE: If in Development and Key exists, use Direct Call (Fast Local Dev)
+  // HYBRID MODE: Direct Client Call (Only works if VITE_GEMINI_API_KEY is in .env)
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
     console.log("⚠️ DEV MODE: Calling Gemini directly (Client-side)");
     try {
@@ -65,9 +64,8 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     }
   }
 
-  // PRODUCTION MODE: Call the Secure Serverless API
+  // SERVER MODE: Call /api/details
   try {
-    // This calls /api/details relative to the current domain (served by server.js)
     const response = await fetch(`/api/details?word=${encodeURIComponent(word)}`);
     
     // Handle HTTP Errors
@@ -77,10 +75,9 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
         const errorData = await response.json();
         throw new Error(errorData.error || `Server Error (${response.status})`);
       } else {
-        // Fallback for HTML errors (like 404 or Hosting 500 pages)
         const text = await response.text();
         console.error("API HTML Error:", text);
-        throw new Error(`API Endpoint Failed (${response.status}). See console for details.`);
+        throw new Error(`API Endpoint Failed (${response.status}).`);
       }
     }
 
@@ -88,12 +85,17 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     return data as WordData;
   } catch (error: any) {
     console.error("Error fetching word details:", error);
+    
+    // Detect "ECONNREFUSED" equivalent in fetch (Network Error)
+    if (error.message && (error.message.includes("Failed to fetch") || error.message.includes("NetworkError"))) {
+      throw new Error("Backend offline. Please run 'npm run server' in a separate terminal.");
+    }
+    
     throw new Error(error.message || "Failed to fetch word details");
   }
 };
 
 export const fetchWordSummary = async (word: string): Promise<string> => {
-  // HYBRID MODE: Local Dev
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
@@ -105,20 +107,17 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
     } catch (e) { return "Local Dev Summary Error"; }
   }
 
-  // PRODUCTION MODE
   try {
     const response = await fetch(`/api/summary?word=${encodeURIComponent(word)}`);
     if (!response.ok) throw new Error("Failed to fetch summary");
     const data = await response.json();
     return data.summary || "Could not generate summary.";
   } catch (error) {
-    console.error("Error fetching summary:", error);
     return "Sorry, I couldn't generate a summary right now.";
   }
 };
 
 export const fetchPronunciation = async (text: string): Promise<ArrayBuffer | null> => {
-  // HYBRID MODE: Local Dev
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
     try {
       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
@@ -135,7 +134,6 @@ export const fetchPronunciation = async (text: string): Promise<ArrayBuffer | nu
     } catch (e) { return null; }
   }
 
-  // PRODUCTION MODE
   try {
     const response = await fetch(`/api/tts?text=${encodeURIComponent(text)}`);
     if (!response.ok) return null;
@@ -143,7 +141,6 @@ export const fetchPronunciation = async (text: string): Promise<ArrayBuffer | nu
     if (data.audio) return decodeAudio(data.audio);
     return null;
   } catch (error) {
-    console.error("Error fetching audio:", error);
     return null;
   }
 };

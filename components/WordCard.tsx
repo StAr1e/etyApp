@@ -47,9 +47,20 @@ export const WordCard: React.FC<WordCardProps> = ({ data }) => {
     // Check if running in Telegram
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
-      // Use switchInlineQuery to let user share result
-      const text = `${data.word}: ${data.definition}`;
+      
+      // Truncate definition to ensure it fits nicely in the inline query box
+      // Telegram has limits on query length
+      const shortDef = data.definition.length > 150 
+        ? data.definition.substring(0, 147) + '...' 
+        : data.definition;
+
+      // Format: "Word: Definition"
+      // The bot parses this specific format in api/bot.ts
+      const text = `${data.word}: ${shortDef}`;
+      
       const types = target === 'groups' ? ['groups', 'supergroups'] : ['users', 'groups', 'channels'];
+      
+      // Open the chat selection with the query pre-filled
       window.Telegram.WebApp.switchInlineQuery(text, types);
     } else {
        // Fallback for web

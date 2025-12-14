@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "dev": "vite",
+    "dev:all": "node server.js & vite",
     "build": "tsc && vite build",
     "start": "node server.js",
     "server": "node server.js"
