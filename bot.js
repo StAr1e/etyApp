@@ -1,8 +1,9 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
+const http = require('http');
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
-const APP_URL = process.env.HOSTING_URL || 'https://your-app-url.vercel.app';
+const APP_URL = process.env.HOSTING_URL || '';
 
 // 1. Handle /start command
 bot.command('start', (ctx) => {
@@ -15,7 +16,6 @@ bot.command('start', (ctx) => {
 });
 
 // 2. Handle Inline Queries (The "Share" functionality)
-// This listens for queries coming from the Mini App's switchInlineQuery method
 bot.on('inline_query', async (ctx) => {
   const query = ctx.inlineQuery.query;
 
@@ -33,7 +33,6 @@ bot.on('inline_query', async (ctx) => {
   }
 
   // Parse the query format "Word: Definition" sent from Frontend
-  // If the user types manually, we treat the whole string as the word
   let title = query;
   let description = 'Ety.ai Word Result';
   let messageText = query;
@@ -49,10 +48,10 @@ bot.on('inline_query', async (ctx) => {
 
   const results = [{
     type: 'article',
-    id: String(Date.now()), // Unique ID
+    id: String(Date.now()),
     title: title,
     description: description.substring(0, 100) + (description.length > 100 ? '...' : ''),
-    thumbnail_url: 'https://cdn-icons-png.flaticon.com/512/3976/3976625.png', // Generic Dictionary Icon
+    thumbnail_url: 'https://cdn-icons-png.flaticon.com/512/3976/3976625.png', 
     input_message_content: {
       message_text: messageText,
       parse_mode: 'HTML'
@@ -71,8 +70,21 @@ bot.on('inline_query', async (ctx) => {
   }
 });
 
-console.log('Bot is running...');
+// 3. Start the Bot
+console.log('Bot is polling...');
 bot.launch();
+
+// 4. Create a dummy HTTP server for Render Health Check
+// Render requires a web service to bind to a port within 60 seconds.
+const PORT = process.env.PORT || 8080;
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Ety.ai Bot is running');
+});
+
+server.listen(PORT, () => {
+  console.log(`Health check server listening on port ${PORT}`);
+});
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));

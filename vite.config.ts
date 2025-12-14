@@ -3,18 +3,26 @@ import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // Load env file based on `mode` in the current working directory.
-  // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
+  // Load env variables from .env file
   const env = loadEnv(mode, process.cwd(), '');
 
   return {
     plugins: [react()],
     define: {
-      // This is critical: Replaces 'process.env.API_KEY' in your code with the actual value during build
-      'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      // ONLY expose the key in Development mode for local testing
+      // In Production (Render), this will be undefined, forcing the app to use the secure /api endpoint
+      'import.meta.env.VITE_GEMINI_API_KEY': mode === 'development' ? JSON.stringify(env.GEMINI_API_KEY || env.VITE_GEMINI_API_KEY) : undefined,
     },
     server: {
-      port: 3000
+      port: 5173,
+      proxy: {
+        // Proxy API requests to the Express server during development (if you run the backend manually)
+        '/api': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          secure: false,
+        }
+      }
     }
   }
 })
