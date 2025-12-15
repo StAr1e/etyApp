@@ -4,13 +4,28 @@ const cache = new Map<string, { data: string, timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export default async function handler(request: any, response: any) {
+  // Allow CORS
+  response.setHeader('Access-Control-Allow-Credentials', true);
+  response.setHeader('Access-Control-Allow-Origin', '*');
+  response.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  response.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (request.method === 'OPTIONS') {
+    return response.status(200).end();
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   
   if (!apiKey) {
+    console.error("API Key Missing");
     return response.status(500).json({ error: "Server Configuration Error: API Key missing" });
   }
 
-  const { word, etymology } = request.query;
+  // Support both GET (query) and POST (body)
+  const { word, etymology } = request.body && Object.keys(request.body).length > 0 ? request.body : request.query;
   
   if (!word) {
     return response.status(400).json({ error: "Word parameter is required" });
@@ -28,19 +43,16 @@ export default async function handler(request: any, response: any) {
 
   try {
     // Construct a prompt that asks for an artistic representation
-    // We use the etymology context to make the image more relevant to the origin
-    const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology || 'Abstract representation'}. No text in the image. Cinematic lighting, 8k resolution.`;
+    const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology ? etymology.substring(0, 300) : 'Abstract representation'}. The image should be a symbolic, visual interpretation without any text. Cinematic lighting, 8k resolution, photorealistic or highly detailed illustration style.`;
+
+    // console.log("Generating image for:", word);
 
     const result = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
       contents: {
         parts: [{ text: prompt }]
       },
-      config: {
-        // Nano banana models do not support responseMimeType or imageConfig for size in the same way as Pro
-        // We rely on defaults or specific model capabilities. 
-        // Note: SDK types might vary, but for 2.5-flash-image, we just send the prompt.
-      }
+      // No config for image size/mime type for this model as per docs
     });
 
     let base64Image = null;
@@ -56,7 +68,9 @@ export default async function handler(request: any, response: any) {
     }
 
     if (!base64Image) {
-        throw new Error("No image data generated.");
+        // Log the full response for debugging (on server side)
+        console.error("No image data in response:", JSON.stringify(result, null, 2));
+        throw new Error("Model returned no image data.");
     }
 
     // 2. Set Cache
@@ -68,11 +82,16 @@ export default async function handler(request: any, response: any) {
 
     return response.status(200).json({ image: base64Image });
   } catch (error: any) {
-    console.error("Image API Error:", error);
+    console.error("Image API Error for word:", word, error);
     
     const msg = error.message?.toLowerCase() || "";
     if (error.status === 429 || msg.includes('429') || msg.includes('quota')) {
        return response.status(429).json({ error: "Daily Image usage limit reached." });
+    }
+
+    // Safety filter error
+    if (msg.includes("safety") || msg.includes("blocked")) {
+        return response.status(400).json({ error: "Image generation blocked by safety filters." });
     }
 
     return response.status(500).json({ error: error.message || "Failed to generate image" });

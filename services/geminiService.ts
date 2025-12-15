@@ -135,7 +135,7 @@ export const fetchWordImage = async (word: string, etymology: string): Promise<s
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
      try {
        const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-       const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology}. No text in the image.`;
+       const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology}. The image should be a symbolic, visual interpretation without any text.`;
        const result = await ai.models.generateContent({
          model: 'gemini-2.5-flash-image',
          contents: { parts: [{ text: prompt }] },
@@ -162,17 +162,24 @@ export const fetchWordImage = async (word: string, etymology: string): Promise<s
 
   // PROD MODE
   try {
-     const params = new URLSearchParams({ word, etymology: etymology.substring(0, 150) });
-     const response = await fetch(`/api/image?${params.toString()}`);
+     // Use POST to avoid URL length issues with long etymology
+     const response = await fetch(`/api/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word, etymology: etymology.substring(0, 500) })
+     });
+
      if (response.ok) {
        const data = await response.json();
        if (data.image) {
          imageCache.set(cleanWord, data.image);
          return data.image;
        }
+     } else {
+        console.warn(`Image API returned ${response.status}: ${await response.text()}`);
      }
   } catch (e) {
-    console.error(e);
+    console.error("Error fetching image:", e);
   }
   return null;
 };

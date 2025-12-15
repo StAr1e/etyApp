@@ -169,9 +169,9 @@ app.get('/api/summary', async (req, res) => {
     }
 });
 
-app.get('/api/image', async (req, res) => {
+app.post('/api/image', async (req, res) => {
     if (!ai) return res.status(500).json({ error: "Server missing API Key" });
-    const { word, etymology } = req.query;
+    const { word, etymology } = req.body;
     if (!word) return res.status(400).json({ error: "Word required" });
 
     const cleanWord = word.trim().toLowerCase();
@@ -179,7 +179,7 @@ app.get('/api/image', async (req, res) => {
     if (cached) return res.json({ image: cached });
 
     try {
-        const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology || 'Abstract representation'}. No text in the image.`;
+        const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology ? etymology.substring(0, 300) : 'Abstract representation'}. The image should be a symbolic, visual interpretation without any text.`;
         
         const result = await ai.models.generateContent({
             model: 'gemini-2.5-flash-image',
@@ -200,9 +200,11 @@ app.get('/api/image', async (req, res) => {
             setCache(imageCache, cleanWord, base64Image);
             res.json({ image: base64Image });
         } else {
+            console.error("No image generated:", JSON.stringify(result));
             res.status(500).json({ error: "No image data" });
         }
     } catch (e) {
+        console.error(e);
         res.status(500).json({ error: e.message });
     }
 });
@@ -353,9 +355,9 @@ app.post('/api/gamification', async (req, res) => {
                  name: u.name || 'Explorer',
                  photoUrl: u.photoUrl || '',
                  xp: u.xp,
-                 level: u.level,
+                 level: u.stats.level,
                  rank: index + 1,
-                 badges: u.badges.length
+                 badges: u.stats.badges.length
              }));
         }
         return res.json(leaderboard);
