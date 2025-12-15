@@ -3,10 +3,10 @@ import mongoose, { Model } from 'mongoose';
 const MONGODB_URI = process.env.MONGODB_URI;
 
 // Global cached connection for Serverless re-use
-let cached = (global as any).mongoose;
+let cached = (globalThis as any).mongoose;
 
 if (!cached) {
-  cached = (global as any).mongoose = { conn: null, promise: null };
+  cached = (globalThis as any).mongoose = { conn: null, promise: null };
 }
 
 export async function connectToDatabase() {
