@@ -171,6 +171,8 @@ export default function App() {
 
   // Restores a word from history without API call
   const handleRestoreFromHistory = (item: SearchHistoryItem) => {
+     setError(null); // Clear any previous errors (e.g. quota limits from other attempts)
+     
      if (item.data) {
        setWordData(item.data);
        setSummary(item.summary || null);

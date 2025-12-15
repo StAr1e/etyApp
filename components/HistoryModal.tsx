@@ -17,12 +17,6 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ history, onClose, on
     item.word.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const formatDate = (ts: number) => {
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
-    }).format(new Date(ts));
-  };
-
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-md animate-in fade-in duration-300 p-4">
       <div className="absolute inset-0" onClick={onClose}></div>
@@ -62,43 +56,52 @@ export const HistoryModal: React.FC<HistoryModalProps> = ({ history, onClose, on
              filteredHistory.map((item) => (
                <div 
                  key={item.timestamp}
-                 className="group relative flex items-center gap-4 p-4 rounded-2xl border border-tg-hint/5 bg-tg-bg hover:border-tg-hint/20 hover:shadow-sm transition-all cursor-pointer"
-                 onClick={() => onSelect(item)}
+                 className="group relative flex items-center gap-3 p-3 rounded-2xl border border-tg-hint/5 bg-tg-bg hover:border-tg-hint/20 hover:shadow-sm transition-all"
                >
-                  {/* Icon / Date */}
-                  <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-tg-secondaryBg text-tg-hint shrink-0">
-                     <span className="text-xs font-bold uppercase">{new Date(item.timestamp).getDate()}</span>
-                     <span className="text-[10px] uppercase">{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(item.timestamp))}</span>
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                     <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-bold text-lg text-tg-text capitalize truncate">{item.word}</h3>
-                        {item.summary && (
-                          <div className="bg-purple-500/10 text-purple-600 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5" title="Summary Saved">
-                             <Wand2 size={8} /> AI
-                          </div>
-                        )}
-                     </div>
-                     <p className="text-xs text-tg-hint truncate pr-4">
-                        {item.data ? item.data.definition : 'Quick Search'}
-                     </p>
-                  </div>
-
-                  {/* Action */}
-                  <div className="text-tg-hint/30 group-hover:text-tg-button transition-colors">
-                     <ChevronRight size={20} />
-                  </div>
-
-                  {/* Delete Button (Hover Only on Desktop, standard layout on mobile) */}
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); onDelete(item.timestamp); }}
-                    className="absolute right-2 top-2 p-2 rounded-full text-tg-hint/20 hover:text-red-500 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
-                    title="Delete"
+                  {/* Click Area for Selection */}
+                  <div 
+                    className="flex-1 flex items-center gap-3 min-w-0 cursor-pointer"
+                    onClick={() => onSelect(item)}
                   >
-                     <Trash2 size={16} />
-                  </button>
+                      {/* Icon / Date */}
+                      <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-tg-secondaryBg text-tg-hint shrink-0">
+                        <span className="text-xs font-bold uppercase">{new Date(item.timestamp).getDate()}</span>
+                        <span className="text-[10px] uppercase">{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(item.timestamp))}</span>
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                            <h3 className="font-bold text-lg text-tg-text capitalize truncate">{item.word}</h3>
+                            {item.summary && (
+                              <div className="bg-purple-500/10 text-purple-600 px-1.5 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5 shrink-0" title="Summary Saved">
+                                <Wand2 size={8} /> AI
+                              </div>
+                            )}
+                        </div>
+                        <p className="text-xs text-tg-hint truncate">
+                            {item.data ? item.data.definition : 'Quick Search'}
+                        </p>
+                      </div>
+                  </div>
+
+                  {/* Actions Area */}
+                  <div className="flex items-center gap-1 border-l border-tg-hint/10 pl-2">
+                     <button 
+                       onClick={() => onSelect(item)}
+                       className="p-2 text-tg-hint/50 hover:text-tg-button transition-colors md:hidden"
+                     >
+                        <ChevronRight size={20} />
+                     </button>
+                     
+                     <button 
+                        onClick={(e) => { e.stopPropagation(); onDelete(item.timestamp); }}
+                        className="p-2 rounded-lg text-tg-hint/40 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                        title="Delete"
+                      >
+                         <Trash2 size={18} />
+                      </button>
+                  </div>
                </div>
              ))
            ) : (
