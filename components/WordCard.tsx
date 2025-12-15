@@ -1,100 +1,164 @@
-import React, { useState } from 'react';
-import { WordData, TelegramWebApp } from '../types.ts';
-import { Play, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck } from 'lucide-react';
-import { fetchPronunciation } from '../services/geminiService';
+import React, { useState, useEffect, useRef } from 'react';
+import { WordData, TelegramWebApp } from '../types';
+import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck, Download, FastForward, Loader2 } from 'lucide-react';
+import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
   data: WordData;
   onShare?: () => void;
 }
 
-export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [copied, setCopied] = useState(false);
+// --- HELPER: CONVERT PCM TO WAV FOR DOWNLOAD ---
+const writeWavHeader = (samples: Int16Array, sampleRate: number): Blob => {
+  const buffer = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buffer);
 
-  const handlePlayAudio = async () => {
-    if (isPlaying) return;
-    setIsPlaying(true);
-    try {
-      const audioBuffer = await fetchPronunciation(data.word);
-      if (audioBuffer) {
-        const SAMPLE_RATE = 24000;
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
-        const dataInt16 = new Int16Array(audioBuffer);
-        const buffer = audioContext.createBuffer(1, dataInt16.length, SAMPLE_RATE);
-        const channelData = buffer.getChannelData(0);
-        for (let i = 0; i < dataInt16.length; i++) {
-          channelData[i] = dataInt16[i] / 32768.0;
-        }
-        const source = audioContext.createBufferSource();
-        source.buffer = buffer;
-        source.connect(audioContext.destination);
-        source.start(0);
-        source.onended = () => setIsPlaying(false);
-      } else {
-        setIsPlaying(false);
-      }
-    } catch (e) {
-      console.error(e);
-      setIsPlaying(false);
+  const writeString = (offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
     }
   };
 
-  const handleShare = () => {
-    // Award XP
-    if (onShare) onShare();
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
 
+  for (let i = 0; i < samples.length; i++) {
+    view.setInt16(44 + i * 2, samples[i], true);
+  }
+
+  return new Blob([view], { type: 'audio/wav' });
+};
+
+export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
+  // Audio State
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isAudioLoading, setIsAudioLoading] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+  const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
+  // Image State
+  const [aiImage, setAiImage] = useState<string | null>(null);
+  const [isImageLoading, setIsImageLoading] = useState(false);
+
+  // UI State
+  const [copied, setCopied] = useState(false);
+
+  // --- EFFECT: FETCH IMAGE ---
+  useEffect(() => {
+    let mounted = true;
+    const loadImage = async () => {
+      setAiImage(null);
+      setIsImageLoading(true);
+      const b64 = await fetchWordImage(data.word, data.etymology);
+      if (mounted && b64) {
+        setAiImage(`data:image/jpeg;base64,${b64}`);
+      }
+      if (mounted) setIsImageLoading(false);
+    };
+    loadImage();
+    
+    // Reset Audio when word changes
+    setAudioBlobUrl(null);
+    setIsPlaying(false);
+    
+    return () => { mounted = false; };
+  }, [data.word]);
+
+  // --- AUDIO LOGIC ---
+
+  const handleTogglePlay = async () => {
+    if (isPlaying) {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    if (audioBlobUrl) {
+      audioRef.current?.play();
+      setIsPlaying(true);
+      return;
+    }
+
+    // First time load: Fetch Full Text
+    setIsAudioLoading(true);
+    try {
+      const fullText = `
+        ${data.word}. 
+        Definition: ${data.definition}. 
+        Etymology: ${data.etymology}. 
+        Fun fact: ${data.funFact}
+      `;
+      
+      const audioBuffer = await fetchPronunciation(fullText);
+      
+      if (audioBuffer) {
+        const SAMPLE_RATE = 24000;
+        const pcmData = new Int16Array(audioBuffer);
+        const wavBlob = writeWavHeader(pcmData, SAMPLE_RATE);
+        const url = URL.createObjectURL(wavBlob);
+        
+        setAudioBlobUrl(url);
+        
+        // Slight delay to ensure element updates
+        setTimeout(() => {
+          if (audioRef.current) {
+            audioRef.current.playbackRate = playbackRate;
+            audioRef.current.play();
+            setIsPlaying(true);
+          }
+        }, 100);
+      }
+    } catch (e) {
+      console.error("Audio generation failed", e);
+    } finally {
+      setIsAudioLoading(false);
+    }
+  };
+
+  const cycleSpeed = () => {
+    const rates = [1.0, 1.5, 2.0];
+    const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
+    setPlaybackRate(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
+  };
+
+  const handleDownloadAudio = () => {
+    if (audioBlobUrl) {
+      const a = document.createElement('a');
+      a.href = audioBlobUrl;
+      a.download = `ety_ai_${data.word}.wav`;
+      a.click();
+    }
+  };
+
+  // --- SHARE & COPY LOGIC ---
+  const handleShare = () => {
+    if (onShare) onShare();
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp as TelegramWebApp;
       tg.HapticFeedback.impactOccurred('medium');
-      
-      const shortDef = data.definition.length > 100 
-        ? data.definition.substring(0, 97) + '...' 
-        : data.definition;
-        
-      const text = `${data.word}: ${shortDef}`;
-      
-      try {
-        // Explicitly allow sharing to users, groups, and channels
-        tg.switchInlineQuery(text, ['users', 'groups', 'channels']);
-      } catch (e) {
-        console.warn("switchInlineQuery failed, falling back to link share", e);
-        // Fallback for web versions or unsupported clients
-        try {
-           const fallbackUrl = `https://t.me/share/url?url=${encodeURIComponent(window.location.href)}&text=${encodeURIComponent(text)}`;
-           
-           // Cast to any to safely check methods that might vary by API version/definition
-           const safeTg = tg as any;
-
-           if (typeof safeTg.openTelegramLink === 'function') {
-             safeTg.openTelegramLink(fallbackUrl);
-           } else if (typeof safeTg.openLink === 'function') {
-             safeTg.openLink(fallbackUrl);
-           } else {
-             window.open(fallbackUrl, '_blank');
-           }
-        } catch (e2) {
-           console.error("Share failed", e2);
-        }
-      }
+      const text = `${data.word}: ${data.definition.substring(0, 90)}...`;
+      try { tg.switchInlineQuery(text, ['users', 'groups', 'channels']); } catch (e) { console.warn(e); }
     } else {
-       // Browser fallback
-       const shareData: any = {
-           title: `Ety.ai: ${data.word}`,
-           text: `${data.word}\n${data.definition}\n\nOrigin: ${data.etymology}`,
-       };
-       if (window.location.protocol.startsWith('http')) shareData.url = window.location.href;
-       if (navigator.share) {
-         navigator.share(shareData).catch(() => handleCopy());
-       } else {
-         handleCopy();
-       }
+       const shareData: any = { title: `Ety.ai: ${data.word}`, text: `${data.word}\n${data.definition}`, };
+       if (navigator.share) navigator.share(shareData).catch(() => handleCopy()); else handleCopy();
     }
   };
 
   const handleCopy = () => {
-    const text = `${data.word.toUpperCase()}\n\n${data.definition}\n\nEtymology: ${data.etymology}`;
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(`${data.word.toUpperCase()}\n\n${data.definition}\n\n${data.etymology}`);
     if(window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -105,55 +169,119 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
       
       {/* 1. Hero Card */}
       <div className="bg-tg-bg rounded-3xl p-6 md:p-8 shadow-soft border border-tg-hint/10 relative overflow-hidden group">
-        {/* Subtle Background Texture */}
-        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-tg-button/5 to-transparent rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
         
-        <div className="relative z-10">
-          <div className="flex justify-between items-start mb-4">
-             <span className="px-3 py-1 bg-tg-secondaryBg text-tg-hint text-xs font-bold rounded-full uppercase tracking-wider border border-tg-hint/10">
-               {data.partOfSpeech}
-             </span>
-             <div className="flex gap-2">
-                <button 
-                  onClick={handleCopy}
-                  className="p-2.5 rounded-full bg-tg-secondaryBg text-tg-hint hover:text-tg-text hover:bg-tg-button/10 transition-colors"
-                  title="Copy"
-                >
-                  {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
-                </button>
-                <button 
-                  onClick={handleShare}
-                  className="p-2.5 rounded-full bg-tg-secondaryBg text-tg-hint hover:text-tg-button hover:bg-tg-button/10 transition-colors"
-                  title="Share"
-                >
-                  <Share2 size={18} />
-                </button>
-             </div>
-          </div>
-
-          <div className="flex flex-col gap-1 mb-6">
-            <h1 className="text-5xl md:text-6xl font-serif font-black text-tg-text tracking-tight capitalize bg-clip-text text-transparent bg-gradient-to-br from-tg-text to-tg-text/70 pb-2">
-              {data.word}
-            </h1>
-            <div className="flex items-center gap-4">
-              <span className="text-xl text-tg-hint font-mono tracking-wide">{data.phonetic}</span>
+        {/* Top Controls */}
+        <div className="relative z-10 flex justify-between items-start mb-6">
+           <span className="px-3 py-1 bg-tg-secondaryBg text-tg-hint text-xs font-bold rounded-full uppercase tracking-wider border border-tg-hint/10">
+             {data.partOfSpeech}
+           </span>
+           <div className="flex gap-2">
               <button 
-                onClick={handlePlayAudio}
-                disabled={isPlaying}
-                className={`p-2 rounded-full bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white transition-all ${isPlaying ? 'animate-pulse' : 'hover:scale-110 active:scale-95'}`}
+                onClick={handleCopy}
+                className="p-2.5 rounded-full bg-tg-secondaryBg text-tg-hint hover:text-tg-text hover:bg-tg-button/10 transition-colors"
               >
-                 {isPlaying ? <Volume2 size={20} /> : <Play size={20} fill="currentColor" />}
+                {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
               </button>
-            </div>
-          </div>
-
-          <div className="relative pl-6">
-            <div className="absolute left-0 top-1 bottom-1 w-1 bg-tg-button rounded-full opacity-30"></div>
-            <p className="text-xl md:text-2xl leading-relaxed text-tg-text font-serif">
-              {data.definition}
-            </p>
-          </div>
+              <button 
+                onClick={handleShare}
+                className="p-2.5 rounded-full bg-tg-secondaryBg text-tg-hint hover:text-tg-button hover:bg-tg-button/10 transition-colors"
+              >
+                <Share2 size={18} />
+              </button>
+           </div>
         </div>
+
+        <div className="relative z-10 mb-6">
+           {/* Word Title */}
+           <h1 className="text-5xl md:text-6xl font-serif font-black text-tg-text tracking-tight capitalize bg-clip-text text-transparent bg-gradient-to-br from-tg-text to-tg-text/70 mb-2">
+              {data.word}
+           </h1>
+           <span className="text-xl text-tg-hint font-mono tracking-wide">{data.phonetic}</span>
+        </div>
+
+        {/* AI IMAGE DISPLAY */}
+        <div className="relative z-10 w-full aspect-square md:aspect-[2/1] rounded-2xl overflow-hidden mb-8 bg-tg-secondaryBg border border-tg-hint/5 shadow-inner">
+           {isImageLoading ? (
+             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-tg-hint/50">
+                <Loader2 size={32} className="animate-spin" />
+                <span className="text-xs font-medium uppercase tracking-widest animate-pulse">Dreaming up image...</span>
+             </div>
+           ) : aiImage ? (
+             <img src={aiImage} alt="AI Generated visualization" className="w-full h-full object-cover animate-in fade-in duration-700 hover:scale-105 transition-transform duration-1000 ease-in-out" />
+           ) : (
+             <div className="absolute inset-0 flex items-center justify-center text-tg-hint/30">
+                <span className="text-xs">No visualization available</span>
+             </div>
+           )}
+           <div className="absolute bottom-3 right-3 px-2 py-1 bg-black/40 backdrop-blur-md rounded-md text-[8px] text-white/80 font-bold uppercase tracking-wider border border-white/10">
+             AI Generated
+           </div>
+        </div>
+
+        {/* DEFINITION */}
+        <div className="relative z-10 pl-6 mb-8 border-l-4 border-tg-button/30">
+           <p className="text-xl md:text-2xl leading-relaxed text-tg-text font-serif">
+              {data.definition}
+           </p>
+        </div>
+
+        {/* FULL AUDIO PLAYER */}
+        <div className="relative z-10 bg-tg-secondaryBg/50 rounded-2xl p-4 border border-tg-hint/10 flex items-center gap-4">
+           {/* Play/Pause */}
+           <button 
+             onClick={handleTogglePlay}
+             disabled={isAudioLoading}
+             className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-lg transition-all ${
+               isAudioLoading 
+                 ? 'bg-tg-hint/20 cursor-wait' 
+                 : 'bg-tg-button text-white hover:scale-105 active:scale-95'
+             }`}
+           >
+             {isAudioLoading ? (
+               <Loader2 size={20} className="animate-spin" />
+             ) : isPlaying ? (
+               <Pause size={20} fill="currentColor" />
+             ) : (
+               <Play size={20} fill="currentColor" className="ml-1" />
+             )}
+           </button>
+
+           <div className="flex-1 min-w-0">
+             <div className="text-sm font-bold text-tg-text">Audio Experience</div>
+             <div className="text-xs text-tg-hint truncate">Listen to the full story</div>
+           </div>
+
+           {/* Controls */}
+           <div className="flex items-center gap-2">
+             {audioBlobUrl && (
+               <>
+                 <button 
+                   onClick={cycleSpeed}
+                   className="px-2 py-1.5 rounded-lg bg-tg-bg border border-tg-hint/10 text-xs font-bold text-tg-text min-w-[3rem] flex items-center justify-center gap-0.5 hover:bg-tg-hint/10 transition-colors"
+                 >
+                   <FastForward size={10} /> {playbackRate}x
+                 </button>
+                 <button 
+                   onClick={handleDownloadAudio}
+                   className="p-2 rounded-lg bg-tg-bg border border-tg-hint/10 text-tg-text hover:bg-tg-hint/10 transition-colors"
+                   title="Download WAV"
+                 >
+                   <Download size={16} />
+                 </button>
+               </>
+             )}
+           </div>
+
+           {/* Hidden Audio Element */}
+           <audio 
+             ref={audioRef} 
+             src={audioBlobUrl || undefined} 
+             onEnded={() => setIsPlaying(false)} 
+             onError={() => { setIsPlaying(false); setIsAudioLoading(false); }}
+             className="hidden"
+           />
+        </div>
+
       </div>
 
       {/* Share Action Block */}

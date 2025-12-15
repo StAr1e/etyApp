@@ -3,7 +3,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import cors from 'cors';
-import { Telegraf, Markup } from 'telegraf';
 import { GoogleGenAI } from '@google/genai';
 import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
@@ -53,6 +52,8 @@ if (MONGODB_URI) {
             console.error("MongoDB Connection Failed:", err);
             console.log("Falling back to JSON file storage.");
         });
+} else {
+    console.log("No MONGODB_URI found. Using local JSON fallback.");
 }
 
 // File-Based DB Fallback
@@ -82,6 +83,7 @@ const saveLocalDb = () => {
 // --- CACHE SETUP ---
 const wordCache = new Map();
 const summaryCache = new Map();
+const imageCache = new Map();
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 const getFromCache = (cache, key) => {
@@ -91,7 +93,7 @@ const getFromCache = (cache, key) => {
 };
 
 const setCache = (cache, key, data) => {
-    if (cache.size > 200) {
+    if (cache.size > 50) {
         const firstKey = cache.keys().next().value;
         cache.delete(firstKey);
     }
@@ -167,6 +169,44 @@ app.get('/api/summary', async (req, res) => {
     }
 });
 
+app.get('/api/image', async (req, res) => {
+    if (!ai) return res.status(500).json({ error: "Server missing API Key" });
+    const { word, etymology } = req.query;
+    if (!word) return res.status(400).json({ error: "Word required" });
+
+    const cleanWord = word.trim().toLowerCase();
+    const cached = getFromCache(imageCache, cleanWord);
+    if (cached) return res.json({ image: cached });
+
+    try {
+        const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology || 'Abstract representation'}. No text in the image.`;
+        
+        const result = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts: [{ text: prompt }] },
+        });
+
+        let base64Image = null;
+        if (result.candidates?.[0]?.content?.parts) {
+            for (const part of result.candidates[0].content.parts) {
+                if (part.inlineData && part.inlineData.data) {
+                    base64Image = part.inlineData.data;
+                    break;
+                }
+            }
+        }
+
+        if (base64Image) {
+            setCache(imageCache, cleanWord, base64Image);
+            res.json({ image: base64Image });
+        } else {
+            res.status(500).json({ error: "No image data" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/tts', async (req, res) => {
     if (!ai) return res.status(500).json({ error: "Server missing API Key" });
     const { text } = req.query;
@@ -195,9 +235,6 @@ app.get('/api/gamification', async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId required" });
     const idStr = userId.toString();
 
-    let stats;
-    let userData;
-
     // --- MONGO PATH ---
     if (useMongo && User) {
         try {
@@ -213,7 +250,7 @@ app.get('/api/gamification', async (req, res) => {
                 if(photo) user.profile.photo = photo;
             }
 
-            // Streak Logic (Duplicated for server.js environment)
+            // Streak Logic
             const last = new Date(user.stats.lastVisit);
             const now = new Date();
             const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
@@ -228,6 +265,7 @@ app.get('/api/gamification', async (req, res) => {
                     user.stats.currentStreak = 1;
                 }
                 user.stats.lastVisit = Date.now();
+                user.markModified('stats');
                 await user.save();
             }
             return res.json(user.stats);
@@ -238,14 +276,14 @@ app.get('/api/gamification', async (req, res) => {
     }
 
     // --- LOCAL FILE PATH ---
-    userData = localDb[idStr] || { 
+    let userData = localDb[idStr] || { 
         stats: { ...INITIAL_STATS, lastVisit: Date.now() },
         profile: { name: name || 'Explorer', photo: photo || '' }
     };
     if (name) userData.profile.name = name;
     if (photo) userData.profile.photo = photo;
 
-    stats = userData.stats;
+    let stats = userData.stats;
     const last = new Date(stats.lastVisit);
     const now = new Date();
     const isSameDay = last.getDate() === now.getDate() && last.getMonth() === now.getMonth() && last.getFullYear() === now.getFullYear();
@@ -362,6 +400,7 @@ app.post('/api/gamification', async (req, res) => {
             addBadge('daily_streak_3', stats.currentStreak >= 3);
             
             stats.lastVisit = Date.now();
+            user.markModified('stats');
             await user.save();
             
             return res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });

@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
-import { WordData } from '../types.ts';
+import { WordData } from '../types';
 
 // Fix for missing types in current environment
 declare global {
@@ -16,6 +16,7 @@ declare global {
 // Simple in-memory cache to prevent re-fetching the same word in one session
 const wordCache = new Map<string, WordData>();
 const summaryCache = new Map<string, string>();
+const imageCache = new Map<string, string>();
 
 // Helper to decode base64 audio
 const decodeAudio = (base64: string): ArrayBuffer => {
@@ -124,6 +125,56 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     console.error("Error fetching word details:", error);
     throw new Error(error.message || "Failed to fetch word details");
   }
+};
+
+export const fetchWordImage = async (word: string, etymology: string): Promise<string | null> => {
+  const cleanWord = word.trim().toLowerCase();
+  if (imageCache.has(cleanWord)) return imageCache.get(cleanWord)!;
+
+  // DEV MODE
+  if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
+     try {
+       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+       const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology}. No text in the image.`;
+       const result = await ai.models.generateContent({
+         model: 'gemini-2.5-flash-image',
+         contents: { parts: [{ text: prompt }] },
+       });
+       let base64 = null;
+       if (result.candidates?.[0]?.content?.parts) {
+          for(const p of result.candidates[0].content.parts) {
+            if (p.inlineData?.data) {
+               base64 = p.inlineData.data;
+               break;
+            }
+          }
+       }
+       if(base64) {
+         imageCache.set(cleanWord, base64);
+         return base64;
+       }
+       return null;
+     } catch (e) {
+       console.error(e);
+       return null;
+     }
+  }
+
+  // PROD MODE
+  try {
+     const params = new URLSearchParams({ word, etymology: etymology.substring(0, 150) });
+     const response = await fetch(`/api/image?${params.toString()}`);
+     if (response.ok) {
+       const data = await response.json();
+       if (data.image) {
+         imageCache.set(cleanWord, data.image);
+         return data.image;
+       }
+     }
+  } catch (e) {
+    console.error(e);
+  }
+  return null;
 };
 
 export const fetchWordSummary = async (word: string): Promise<string> => {
