@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { UserStats, LevelInfo, Badge, TelegramWebApp } from '../types';
 import { BADGES, getLevelInfo } from '../services/gamification';
 import { X, Trophy, Share2, Crown, Zap, Shield, Flame, BookOpen, Map, Anchor, Search, Lock } from 'lucide-react';
@@ -14,6 +14,8 @@ const IconMap: Record<string, React.FC<any>> = {
 };
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onShowLeaderboard }) => {
+  const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
+  
   const levelInfo = getLevelInfo(stats.xp);
   const progress = Math.min(100, Math.max(0, ((stats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100));
 
@@ -121,9 +123,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                       const Icon = IconMap[badge.icon] || Shield;
 
                       return (
-                        <div 
+                        <button 
                           key={badge.id}
-                          className={`relative group overflow-hidden p-4 rounded-2xl border transition-all duration-300 ${
+                          onClick={() => setSelectedBadge(badge)}
+                          className={`text-left w-full relative group overflow-hidden p-4 rounded-2xl border transition-all duration-300 active:scale-95 ${
                             isUnlocked 
                               ? 'bg-gradient-to-br from-tg-bg to-tg-secondaryBg border-tg-hint/10 shadow-sm' 
                               : 'bg-tg-secondaryBg/50 border-transparent opacity-60 grayscale'
@@ -148,7 +151,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                                  </div>
                               </div>
                            </div>
-                        </div>
+                        </button>
                       );
                    })}
                 </div>
@@ -174,6 +177,60 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
              </div>
           </div>
        </div>
+
+       {/* --- BADGE DETAIL POPUP --- */}
+       {selectedBadge && (() => {
+         const isUnlocked = stats.badges.includes(selectedBadge.id);
+         const Icon = IconMap[selectedBadge.icon] || Shield;
+         
+         return (
+           <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+               <div className="absolute inset-0" onClick={() => setSelectedBadge(null)}></div>
+               
+               <div className="bg-tg-bg w-full max-w-xs rounded-3xl p-6 shadow-2xl transform transition-all scale-100 relative overflow-hidden border border-tg-hint/10 animate-in zoom-in-95 duration-200">
+                   {/* Background Effects */}
+                   {isUnlocked && (
+                       <div className={`absolute top-0 inset-x-0 h-32 bg-gradient-to-b ${selectedBadge.color} opacity-20 blur-xl -mt-10`}></div>
+                   )}
+      
+                   <button 
+                       onClick={() => setSelectedBadge(null)}
+                       className="absolute top-4 right-4 p-2 bg-tg-secondaryBg/80 rounded-full text-tg-hint hover:text-tg-text transition-colors z-20 backdrop-blur-sm"
+                   >
+                       <X size={16} />
+                   </button>
+      
+                   <div className="flex flex-col items-center relative z-10 space-y-4">
+                       <div className={`w-24 h-24 rounded-3xl flex items-center justify-center shadow-lg mb-2 ${
+                           isUnlocked 
+                           ? `bg-gradient-to-br ${selectedBadge.color} text-white` 
+                           : 'bg-tg-secondaryBg text-tg-hint'
+                       }`}>
+                           {isUnlocked ? <Icon size={48} /> : <Lock size={40} />}
+                       </div>
+      
+                       <div className="text-center w-full">
+                           <h3 className="text-2xl font-bold text-tg-text mb-2">{selectedBadge.name}</h3>
+                           
+                           <div className={`inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest mb-4 border ${
+                               isUnlocked 
+                               ? 'bg-green-500/10 text-green-600 border-green-500/20' 
+                               : 'bg-tg-secondaryBg text-tg-hint border-tg-hint/10'
+                           }`}>
+                               {isUnlocked ? 'Unlocked' : 'Locked'}
+                           </div>
+                           
+                           <div className="bg-tg-secondaryBg/50 p-4 rounded-2xl border border-tg-hint/5">
+                             <p className="text-tg-text/90 leading-relaxed text-sm font-medium">
+                                 {selectedBadge.description}
+                             </p>
+                           </div>
+                       </div>
+                   </div>
+               </div>
+           </div>
+         );
+       })()}
     </div>
   );
 };
