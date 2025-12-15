@@ -58,6 +58,12 @@ export interface IUser {
     currentStreak: number;
     badges: string[];
   };
+  searchHistory: {
+    word: string;
+    timestamp: number;
+    data: any; // WordData stored as Mixed/Object
+    summary?: string;
+  }[];
 }
 
 const UserSchema = new mongoose.Schema<IUser>({
@@ -75,7 +81,13 @@ const UserSchema = new mongoose.Schema<IUser>({
     lastVisit: { type: Number, default: Date.now },
     currentStreak: { type: Number, default: 1 },
     badges: { type: [String], default: [] }
-  }
+  },
+  searchHistory: [{
+    word: String,
+    timestamp: Number,
+    data: Object,
+    summary: String
+  }]
 }, { 
   timestamps: true,
   toJSON: { virtuals: true },

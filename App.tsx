@@ -33,11 +33,14 @@ export default function App() {
 
   // --- Handlers ---
 
-  const handleGamificationAction = async (action: 'SEARCH' | 'SUMMARY' | 'SHARE') => {
+  const handleGamificationAction = async (
+      action: 'SEARCH' | 'SUMMARY' | 'SHARE', 
+      payload?: { wordData?: WordData, word?: string, summary?: string }
+    ) => {
     if (!user) return; // Cannot track if no user ID
 
-    // Optimistic update could happen here, but for now we wait for server response
-    const { stats, newBadges } = await trackAction(user.id, action);
+    // Send payload (word data) to server to persist history
+    const { stats, newBadges, history: serverHistory } = await trackAction(user.id, action, payload);
     
     // Check for level up
     if (stats.level > userStats.level) {
@@ -52,6 +55,12 @@ export default function App() {
     }
 
     setUserStats(stats);
+    
+    // Update local history if server returned it (source of truth)
+    if (serverHistory && serverHistory.length > 0) {
+      setHistory(serverHistory);
+      localStorage.setItem('ety_history', JSON.stringify(serverHistory));
+    }
   };
 
   const handleLogin = () => {
@@ -109,12 +118,18 @@ export default function App() {
       const text = await fetchWordSummary(wordData.word);
       setSummary(text);
       setShowSummaryModal(true);
-      if(user) handleGamificationAction('SUMMARY'); 
       
-      // Update History with the new summary
+      // Update history and stats on server
+      if(user) {
+          handleGamificationAction('SUMMARY', { 
+              word: wordData.word, 
+              summary: text 
+          }); 
+      }
+      
+      // Optimistic local update (in case server request fails or takes time)
       const updatedHistory = history.map(item => {
         if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
-           // We prioritize the most recent, but generally just update the existing one if we just searched it
            return { ...item, summary: text };
         }
         return item;
@@ -128,7 +143,7 @@ export default function App() {
     } finally {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
-  }, [wordData, user, history]); // Added history dependency
+  }, [wordData, user, history]); 
 
   const handleSearch = async (term: string) => {
     if (!term) return;
@@ -140,25 +155,38 @@ export default function App() {
     try {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
       
-      const data = await fetchWordDetails(term);
+      // 1. Check if we have this exact word with DATA in history first (Client Cache)
+      const localCached = history.find(h => h.word.toLowerCase() === term.toLowerCase() && h.data);
+      let data: WordData;
+
+      if (localCached && localCached.data) {
+          console.log("Loading from Local History Cache");
+          data = localCached.data;
+      } else {
+          // 2. Fetch from API
+          data = await fetchWordDetails(term);
+      }
+      
       setWordData(data);
       setView('result');
-      if(user) handleGamificationAction('SEARCH'); 
 
-      // Update History: Filter out duplicate, add new with FULL DATA, slice to 50
-      const newItem: SearchHistoryItem = { 
-        word: data.word, 
-        timestamp: Date.now(),
-        data: data // Save full data for offline/history view
-      };
-
-      const newHistory = [
-        newItem,
-        ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
-      ].slice(0, 50); 
-      
-      setHistory(newHistory);
-      localStorage.setItem('ety_history', JSON.stringify(newHistory));
+      if(user) {
+         // This will save the full data to DB, so next time it is fetched from DB history
+         handleGamificationAction('SEARCH', { wordData: data }); 
+      } else {
+         // Local-only fallback update
+         const newItem: SearchHistoryItem = { 
+            word: data.word, 
+            timestamp: Date.now(),
+            data: data 
+         };
+         const newHistory = [
+            newItem,
+            ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
+         ].slice(0, 50); 
+         setHistory(newHistory);
+         localStorage.setItem('ety_history', JSON.stringify(newHistory));
+      }
 
     } catch (err: any) {
       console.error(err);
@@ -171,7 +199,7 @@ export default function App() {
 
   // Restores a word from history without API call
   const handleRestoreFromHistory = (item: SearchHistoryItem) => {
-     setError(null); // Clear any previous errors (e.g. quota limits from other attempts)
+     setError(null); 
      
      if (item.data) {
        setWordData(item.data);
@@ -179,7 +207,6 @@ export default function App() {
        setView('result');
        setShowHistoryModal(false);
      } else {
-       // Legacy history item without data -> fetch it
        setShowHistoryModal(false);
        handleSearch(item.word);
      }
@@ -189,6 +216,8 @@ export default function App() {
      const newHistory = history.filter(h => h.timestamp !== timestamp);
      setHistory(newHistory);
      localStorage.setItem('ety_history', JSON.stringify(newHistory));
+     // Note: We currently don't have an API to delete individual history items from server, 
+     // but local deletion improves UX immediately.
   };
 
   const handleClearHistory = () => {
@@ -219,7 +248,7 @@ export default function App() {
       });
     }
     
-    // 2. Load History
+    // 2. Load History from Local Storage (Immediate Display)
     const saved = localStorage.getItem('ety_history');
     if (saved) {
       try {
@@ -241,10 +270,17 @@ export default function App() {
 
   }, []);
 
-  // Fetch Stats when User is Identified
+  // Fetch Stats & History when User is Identified
   useEffect(() => {
     if (user) {
-        fetchUserStats(user).then(setUserStats);
+        fetchUserStats(user).then(({ stats, history: serverHistory }) => {
+            setUserStats(stats);
+            // Merge server history if available
+            if (serverHistory && serverHistory.length > 0) {
+               setHistory(serverHistory);
+               localStorage.setItem('ety_history', JSON.stringify(serverHistory));
+            }
+        });
     }
   }, [user]);
 

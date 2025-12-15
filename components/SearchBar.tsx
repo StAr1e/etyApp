@@ -29,6 +29,12 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
     }
   };
 
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Prevent spaces - single word only constraint
+    const val = e.target.value.replace(/\s/g, '');
+    setQuery(val);
+  };
+
   return (
     <div className="relative z-50 group">
       {/* Search Input Container */}
@@ -49,7 +55,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={handleChange}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setTimeout(() => setIsFocused(false), 200)}
             placeholder="Search etymology..."

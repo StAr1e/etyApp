@@ -1,4 +1,4 @@
-import type { UserStats, LevelInfo, Badge, BadgeId, LeaderboardEntry, TelegramUser } from '../types';
+import type { UserStats, LevelInfo, Badge, BadgeId, LeaderboardEntry, TelegramUser, SearchHistoryItem, WordData } from '../types';
 
 // --- SHARED DEFINITIONS (Used by UI for rendering) ---
 
@@ -96,7 +96,7 @@ export const INITIAL_STATS: UserStats = {
 
 // --- API CLIENT ---
 
-export const fetchUserStats = async (user: TelegramUser): Promise<UserStats> => {
+export const fetchUserStats = async (user: TelegramUser): Promise<{ stats: UserStats, history: SearchHistoryItem[] }> => {
   try {
     // Pass name/photo so server can update user profile for leaderboard
     const params = new URLSearchParams({
@@ -108,27 +108,40 @@ export const fetchUserStats = async (user: TelegramUser): Promise<UserStats> => 
     const response = await fetch(`/api/gamification?${params.toString()}`);
     
     if (!response.ok) throw new Error('Failed to fetch stats');
-    const serverStats = await response.json();
+    const result = await response.json();
     
+    // Result contains { stats, history }
+    const serverStats = result.stats || INITIAL_STATS;
+    const serverHistory = result.history || [];
+
     // Simple Cache for offline fallback
     localStorage.setItem(`ety_stats_${user.id}`, JSON.stringify(serverStats));
-    return serverStats;
+    // We don't necessarily overwrite local history entirely, merging happens in App usually,
+    // but for now let's assume server is source of truth for stats
+    
+    return { stats: serverStats, history: serverHistory };
   } catch (error) {
     console.warn("Gamification API unavailable:", error);
-    const local = localStorage.getItem(`ety_stats_${user.id}`);
-    return local ? JSON.parse(local) : INITIAL_STATS;
+    const localStats = localStorage.getItem(`ety_stats_${user.id}`);
+    const localHistory = localStorage.getItem('ety_history');
+    
+    return { 
+      stats: localStats ? JSON.parse(localStats) : INITIAL_STATS, 
+      history: localHistory ? JSON.parse(localHistory) : []
+    };
   }
 };
 
 export const trackAction = async (
   userId: number, 
-  action: 'SEARCH' | 'SUMMARY' | 'SHARE'
-): Promise<{ stats: UserStats, newBadges: Badge[] }> => {
+  action: 'SEARCH' | 'SUMMARY' | 'SHARE',
+  payload?: { wordData?: WordData, word?: string, summary?: string }
+): Promise<{ stats: UserStats, newBadges: Badge[], history?: SearchHistoryItem[] }> => {
   try {
     const response = await fetch('/api/gamification', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, action })
+      body: JSON.stringify({ userId, action, payload })
     });
     
     if (!response.ok) throw new Error('Failed to update stats');
@@ -140,7 +153,7 @@ export const trackAction = async (
     
     const newBadgeObjects = result.newBadges.map((id: BadgeId) => BADGES[id]).filter(Boolean);
     
-    return { stats: result.stats, newBadges: newBadgeObjects };
+    return { stats: result.stats, newBadges: newBadgeObjects, history: result.history };
   } catch (error) {
     console.error("Gamification update failed:", error);
     const local = localStorage.getItem(`ety_stats_${userId}`);

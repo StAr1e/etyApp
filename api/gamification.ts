@@ -89,7 +89,8 @@ export default async function handler(request: any, response: any) {
         user = await User.create({
           userId: idStr,
           profile: { name: name || 'Explorer', photo: photo || '' },
-          stats: { ...INITIAL_STATS }
+          stats: { ...INITIAL_STATS },
+          searchHistory: []
         });
       } else {
         // Update profile info if changed
@@ -100,24 +101,25 @@ export default async function handler(request: any, response: any) {
       // Check Streak
       const streakXp = updateStreak(user.stats);
       if (streakXp > 0 || name || photo) {
-        // Mongoose detects changes in subdocs automatically, but explicit save ensures it
         user.markModified('stats'); 
         await user.save();
       }
 
-      return response.status(200).json(user.stats);
+      return response.status(200).json({
+        stats: user.stats,
+        history: user.searchHistory || []
+      });
     }
 
     // --- POST ACTIONS ---
     if (request.method === 'POST') {
-      const { userId, action, name, photo, stats: syncedStats } = request.body;
+      const { userId, action, name, photo, stats: syncedStats, payload } = request.body;
       if (!action) return response.status(400).json({ error: "Missing action" });
 
       // --- LEADERBOARD ACTION ---
       if (action === 'LEADERBOARD') {
         if (userId) {
           const idStr = userId.toString();
-          // Ensure requesting user exists/is updated
           await User.findOneAndUpdate(
             { userId: idStr },
             { 
@@ -125,7 +127,6 @@ export default async function handler(request: any, response: any) {
                  'profile.name': name || 'Explorer',
                  'profile.photo': photo || '' 
               },
-              // If client has better XP (rare sync issue), take it
               ...(syncedStats ? { 
                  $max: { 'stats.xp': syncedStats.xp } 
               } : {})
@@ -134,7 +135,6 @@ export default async function handler(request: any, response: any) {
           );
         }
 
-        // Get Top 50
         const topUsers = await User.find({})
           .sort({ 'stats.xp': -1 })
           .limit(50)
@@ -162,7 +162,8 @@ export default async function handler(request: any, response: any) {
          user = new User({
            userId: idStr,
            profile: { name: name || 'Explorer', photo: photo || '' },
-           stats: { ...INITIAL_STATS }
+           stats: { ...INITIAL_STATS },
+           searchHistory: []
          });
       }
 
@@ -173,8 +174,43 @@ export default async function handler(request: any, response: any) {
       const xpGain = XP_ACTIONS[action] || 0;
       stats.xp += xpGain;
 
-      if (action === 'SEARCH') stats.wordsDiscovered++;
-      if (action === 'SUMMARY') stats.summariesGenerated++;
+      if (action === 'SEARCH') {
+        stats.wordsDiscovered++;
+        // Save Search History
+        if (payload && payload.wordData) {
+           // Remove duplicates
+           if (!user.searchHistory) user.searchHistory = [];
+           user.searchHistory = user.searchHistory.filter(item => 
+             item.word.toLowerCase() !== payload.wordData.word.toLowerCase()
+           );
+           // Add new to top
+           user.searchHistory.unshift({
+             word: payload.wordData.word,
+             timestamp: Date.now(),
+             data: payload.wordData,
+             summary: payload.summary || ''
+           });
+           // Limit to 50
+           if (user.searchHistory.length > 50) {
+             user.searchHistory = user.searchHistory.slice(0, 50);
+           }
+        }
+      }
+
+      if (action === 'SUMMARY') {
+        stats.summariesGenerated++;
+        // Update Summary in History
+        if (payload && payload.word && payload.summary) {
+          if (!user.searchHistory) user.searchHistory = [];
+          const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
+          if (idx !== -1) {
+             user.searchHistory[idx].summary = payload.summary;
+             // Move to top if updated? Optional. Let's keep position or move to top.
+             // Let's just update in place for summary.
+          }
+        }
+      }
+
       if (action === 'SHARE') stats.shares++;
 
       // Recalculate Level
@@ -186,10 +222,12 @@ export default async function handler(request: any, response: any) {
       stats.lastVisit = Date.now();
       
       user.markModified('stats');
+      user.markModified('searchHistory'); // Explicitly mark history as modified
       await user.save();
 
       return response.status(200).json({
          stats,
+         history: user.searchHistory,
          newBadges,
          leveledUp: stats.level > previousLevel
       });

@@ -43,7 +43,13 @@ if (MONGODB_URI) {
                     lastVisit: { type: Number, default: Date.now },
                     currentStreak: { type: Number, default: 1 },
                     badges: { type: [String], default: [] }
-                }
+                },
+                searchHistory: [{
+                    word: String,
+                    timestamp: Number,
+                    data: Object,
+                    summary: String
+                }]
             }, { timestamps: true });
             
             User = mongoose.models.User || mongoose.model('User', UserSchema);
@@ -245,7 +251,8 @@ app.get('/api/gamification', async (req, res) => {
                 user = await User.create({
                     userId: idStr,
                     profile: { name: name || 'Explorer', photo: photo || '' },
-                    stats: { ...INITIAL_STATS }
+                    stats: { ...INITIAL_STATS },
+                    searchHistory: []
                 });
             } else if (name || photo) {
                 if(name) user.profile.name = name;
@@ -270,7 +277,7 @@ app.get('/api/gamification', async (req, res) => {
                 user.markModified('stats');
                 await user.save();
             }
-            return res.json(user.stats);
+            return res.json({ stats: user.stats, history: user.searchHistory || [] });
         } catch(e) {
             console.error("Mongo Error", e);
             return res.status(500).json({error: "DB Error"});
@@ -280,7 +287,8 @@ app.get('/api/gamification', async (req, res) => {
     // --- LOCAL FILE PATH ---
     let userData = localDb[idStr] || { 
         stats: { ...INITIAL_STATS, lastVisit: Date.now() },
-        profile: { name: name || 'Explorer', photo: photo || '' }
+        profile: { name: name || 'Explorer', photo: photo || '' },
+        searchHistory: []
     };
     if (name) userData.profile.name = name;
     if (photo) userData.profile.photo = photo;
@@ -304,11 +312,11 @@ app.get('/api/gamification', async (req, res) => {
     userData.stats = stats;
     localDb[idStr] = userData;
     saveLocalDb();
-    res.json(stats);
+    res.json({ stats, history: userData.searchHistory || [] });
 });
 
 app.post('/api/gamification', async (req, res) => {
-    const { userId, action, name, photo, stats: syncedStats } = req.body;
+    const { userId, action, name, photo, stats: syncedStats, payload } = req.body;
     if (!action) return res.status(400).json({ error: "Missing action" });
 
     // --- LEADERBOARD ---
@@ -344,7 +352,8 @@ app.post('/api/gamification', async (req, res) => {
                  if (!existing || (syncedStats.xp > (existing.stats?.xp || 0))) {
                      localDb[idStr] = {
                          stats: syncedStats,
-                         profile: { name: name || 'Explorer', photo: photo || '' }
+                         profile: { name: name || 'Explorer', photo: photo || '' },
+                         searchHistory: existing?.searchHistory || []
                      };
                      saveLocalDb();
                  }
@@ -366,6 +375,26 @@ app.post('/api/gamification', async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId required" });
     const idStr = userId.toString();
 
+    // Helper for history update
+    const updateHistory = (history, pl, act) => {
+        if (!history) history = [];
+        if (act === 'SEARCH' && pl && pl.wordData) {
+            history = history.filter(item => item.word.toLowerCase() !== pl.wordData.word.toLowerCase());
+            history.unshift({
+                word: pl.wordData.word,
+                timestamp: Date.now(),
+                data: pl.wordData,
+                summary: pl.summary || ''
+            });
+            if (history.length > 50) history = history.slice(0, 50);
+        }
+        if (act === 'SUMMARY' && pl && pl.word && pl.summary) {
+            const idx = history.findIndex(h => h.word.toLowerCase() === pl.word.toLowerCase());
+            if (idx !== -1) history[idx].summary = pl.summary;
+        }
+        return history;
+    };
+
     // --- MONGO UPDATE ---
     if (useMongo && User) {
         try {
@@ -374,7 +403,8 @@ app.post('/api/gamification', async (req, res) => {
                 user = new User({
                     userId: idStr,
                     profile: { name: name || 'Explorer', photo: photo || '' },
-                    stats: { ...INITIAL_STATS }
+                    stats: { ...INITIAL_STATS },
+                    searchHistory: []
                 });
             }
             
@@ -403,9 +433,14 @@ app.post('/api/gamification', async (req, res) => {
             
             stats.lastVisit = Date.now();
             user.markModified('stats');
+
+            // Handle History
+            user.searchHistory = updateHistory(user.searchHistory, payload, action);
+            user.markModified('searchHistory');
+
             await user.save();
             
-            return res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });
+            return res.json({ stats, history: user.searchHistory, newBadges, leveledUp: stats.level > previousLevel });
         } catch(e) {
             console.error(e);
             return res.status(500).json({error: "DB Error"});
@@ -413,7 +448,7 @@ app.post('/api/gamification', async (req, res) => {
     }
 
     // --- LOCAL FALLBACK ---
-    let userData = localDb[idStr] || { stats: { ...INITIAL_STATS }, profile: { name: 'Unknown', photo: '' } };
+    let userData = localDb[idStr] || { stats: { ...INITIAL_STATS }, profile: { name: 'Unknown', photo: '' }, searchHistory: [] };
     let stats = userData.stats;
     const newBadges = [];
     const previousLevel = stats.level;
@@ -438,10 +473,14 @@ app.post('/api/gamification', async (req, res) => {
     addBadge('daily_streak_3', stats.currentStreak >= 3);
 
     stats.lastVisit = Date.now();
+    
+    // History
+    userData.searchHistory = updateHistory(userData.searchHistory, payload, action);
+
     localDb[idStr] = userData;
     saveLocalDb();
 
-    res.json({ stats, newBadges, leveledUp: stats.level > previousLevel });
+    res.json({ stats, history: userData.searchHistory, newBadges, leveledUp: stats.level > previousLevel });
 });
 
 app.get('*', (req, res) => {
