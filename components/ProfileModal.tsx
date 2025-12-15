@@ -144,7 +144,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                               <div className="min-w-0">
                                  <div className="font-bold text-sm text-tg-text truncate leading-tight mb-1">{badge.name}</div>
                                  <div className="text-[10px] text-tg-hint leading-tight line-clamp-2">
-                                   {isUnlocked ? badge.description : 'Locked'}
+                                   {badge.description}
                                  </div>
                               </div>
                            </div>
