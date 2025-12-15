@@ -32,42 +32,54 @@ export const BADGES: Record<BadgeId, Badge> = {
     name: 'First Discovery',
     description: 'Searched for your first word.',
     icon: 'Search',
-    color: 'from-blue-400 to-blue-600'
+    color: 'from-blue-400 to-blue-600',
+    statKey: 'wordsDiscovered',
+    threshold: 1
   },
   explorer_10: {
     id: 'explorer_10',
     name: 'Explorer',
     description: 'Discovered 10 unique words.',
     icon: 'Map',
-    color: 'from-emerald-400 to-teal-600'
+    color: 'from-emerald-400 to-teal-600',
+    statKey: 'wordsDiscovered',
+    threshold: 10
   },
   linguist_50: {
     id: 'linguist_50',
     name: 'Linguist',
     description: 'A true lover of words. 50 discoveries.',
     icon: 'BookOpen',
-    color: 'from-violet-400 to-purple-600'
+    color: 'from-violet-400 to-purple-600',
+    statKey: 'wordsDiscovered',
+    threshold: 50
   },
   deep_diver: {
     id: 'deep_diver',
     name: 'Deep Diver',
     description: 'Generated 5 AI deep dive summaries.',
     icon: 'Anchor',
-    color: 'from-cyan-400 to-blue-500'
+    color: 'from-cyan-400 to-blue-500',
+    statKey: 'summariesGenerated',
+    threshold: 5
   },
   social_butterfly: {
     id: 'social_butterfly',
     name: 'Town Crier',
     description: 'Shared knowledge with others 3 times.',
     icon: 'Share2',
-    color: 'from-pink-400 to-rose-600'
+    color: 'from-pink-400 to-rose-600',
+    statKey: 'shares',
+    threshold: 3
   },
   daily_streak_3: {
     id: 'daily_streak_3',
     name: 'Consistent',
     description: 'Used the app for 3 days in a row.',
     icon: 'Flame',
-    color: 'from-amber-400 to-orange-600'
+    color: 'from-amber-400 to-orange-600',
+    statKey: 'currentStreak',
+    threshold: 3
   }
 };
 

@@ -32,6 +32,8 @@ export interface Badge {
   description: string;
   icon: string;
   color: string;
+  statKey?: keyof UserStats;
+  threshold?: number;
   unlockedAt?: number;
 }
 

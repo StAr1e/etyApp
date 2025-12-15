@@ -176,9 +176,13 @@ export const fetchWordImage = async (word: string, etymology: string): Promise<s
          return data.image;
        }
      } else {
+        if (response.status === 429) {
+            throw new Error("QUOTA_EXCEEDED");
+        }
         console.warn(`Image API returned ${response.status}: ${await response.text()}`);
      }
-  } catch (e) {
+  } catch (e: any) {
+    if (e.message === "QUOTA_EXCEEDED") throw e;
     console.error("Error fetching image:", e);
   }
   return null;

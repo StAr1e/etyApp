@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordData, TelegramWebApp } from '../types';
-import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck, Download, FastForward, Loader2 } from 'lucide-react';
+import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck, Download, FastForward, Loader2, RefreshCw, CloudOff } from 'lucide-react';
 import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
@@ -51,30 +51,42 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
   // Image State
   const [aiImage, setAiImage] = useState<string | null>(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   // UI State
   const [copied, setCopied] = useState(false);
 
   // --- EFFECT: FETCH IMAGE ---
-  useEffect(() => {
-    let mounted = true;
-    const loadImage = async () => {
-      setAiImage(null);
-      setIsImageLoading(true);
+  const loadImage = useCallback(async () => {
+    setAiImage(null);
+    setImageError(null);
+    setIsImageLoading(true);
+    try {
       const b64 = await fetchWordImage(data.word, data.etymology);
-      if (mounted && b64) {
+      if (b64) {
         setAiImage(`data:image/jpeg;base64,${b64}`);
+      } else {
+        setImageError("generation_failed");
       }
-      if (mounted) setIsImageLoading(false);
-    };
+    } catch (e: any) {
+      console.error("Image load failed", e);
+      if (e.message === "QUOTA_EXCEEDED") {
+          setImageError("quota_exceeded");
+      } else {
+          setImageError("generation_failed");
+      }
+    } finally {
+      setIsImageLoading(false);
+    }
+  }, [data.word, data.etymology]);
+
+  useEffect(() => {
     loadImage();
     
     // Reset Audio when word changes
     setAudioBlobUrl(null);
     setIsPlaying(false);
-    
-    return () => { mounted = false; };
-  }, [data.word]);
+  }, [loadImage]);
 
   // --- AUDIO LOGIC ---
 
@@ -86,8 +98,13 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
     }
 
     if (audioBlobUrl) {
-      audioRef.current?.play();
-      setIsPlaying(true);
+      // If we have audio, just play it
+      // Ensure speed is set
+      if(audioRef.current) {
+         audioRef.current.playbackRate = playbackRate;
+         audioRef.current.play();
+         setIsPlaying(true);
+      }
       return;
     }
 
@@ -200,7 +217,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
         </div>
 
         {/* AI IMAGE DISPLAY */}
-        <div className="relative z-10 w-full aspect-square md:aspect-[2/1] rounded-2xl overflow-hidden mb-8 bg-tg-secondaryBg border border-tg-hint/5 shadow-inner">
+        <div className="relative z-10 w-full aspect-square md:aspect-[2/1] rounded-2xl overflow-hidden mb-8 bg-tg-secondaryBg border border-tg-hint/5 shadow-inner group-image">
            {isImageLoading ? (
              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-tg-hint/50">
                 <Loader2 size={32} className="animate-spin" />
@@ -209,13 +226,31 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
            ) : aiImage ? (
              <img src={aiImage} alt="AI Generated visualization" className="w-full h-full object-cover animate-in fade-in duration-700 hover:scale-105 transition-transform duration-1000 ease-in-out" />
            ) : (
-             <div className="absolute inset-0 flex items-center justify-center text-tg-hint/30">
-                <span className="text-xs">No visualization available</span>
+             <div className="absolute inset-0 flex flex-col items-center justify-center text-tg-hint/40 gap-3 p-4 text-center">
+                {imageError === 'quota_exceeded' ? (
+                   <>
+                     <CloudOff size={24} className="opacity-50 text-amber-500" />
+                     <span className="text-xs font-bold text-tg-hint">Daily image limit reached</span>
+                     <span className="text-[10px] opacity-60">High demand. Try again tomorrow!</span>
+                   </>
+                ) : (
+                   <>
+                      <span className="text-xs">No visualization available</span>
+                      <button 
+                        onClick={loadImage}
+                        className="px-3 py-1.5 rounded-full bg-tg-bg border border-tg-hint/20 text-xs font-bold flex items-center gap-1 hover:bg-tg-secondaryBg transition-colors"
+                      >
+                         <RefreshCw size={12} /> Retry
+                      </button>
+                   </>
+                )}
              </div>
            )}
-           <div className="absolute bottom-3 right-3 px-2 py-1 bg-black/40 backdrop-blur-md rounded-md text-[8px] text-white/80 font-bold uppercase tracking-wider border border-white/10">
-             AI Generated
-           </div>
+           {aiImage && (
+             <div className="absolute bottom-3 right-3 px-2 py-1 bg-black/40 backdrop-blur-md rounded-md text-[8px] text-white/80 font-bold uppercase tracking-wider border border-white/10">
+               AI Generated
+             </div>
+           )}
         </div>
 
         {/* DEFINITION */}

@@ -121,6 +121,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                    {Object.values(BADGES).map((badge) => {
                       const isUnlocked = stats.badges.includes(badge.id);
                       const Icon = IconMap[badge.icon] || Shield;
+                      
+                      // Calculate progress if locked
+                      const currentVal = (badge.statKey ? stats[badge.statKey] : 0) as number;
+                      const threshold = badge.threshold || 1;
+                      const currentProgress = Math.min(currentVal, threshold);
+                      const percentage = Math.round((currentProgress / threshold) * 100);
 
                       return (
                         <button 
@@ -144,11 +150,20 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                               }`}>
                                  {isUnlocked ? <Icon size={18} /> : <Lock size={16} />}
                               </div>
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                  <div className="font-bold text-sm text-tg-text truncate leading-tight mb-1">{badge.name}</div>
-                                 <div className="text-[10px] text-tg-hint leading-tight line-clamp-2">
+                                 <div className="text-xs text-tg-hint/80 leading-snug line-clamp-2">
                                    {badge.description}
                                  </div>
+                                 {/* Progress Bar for Locked Items */}
+                                 {!isUnlocked && badge.threshold && (
+                                    <div className="mt-2 flex items-center gap-2">
+                                       <div className="flex-1 h-1.5 bg-tg-hint/10 rounded-full overflow-hidden">
+                                          <div className="h-full bg-tg-hint/50" style={{ width: `${percentage}%` }}></div>
+                                       </div>
+                                       <span className="text-[9px] font-mono font-bold text-tg-hint">{currentProgress}/{threshold}</span>
+                                    </div>
+                                 )}
                               </div>
                            </div>
                         </button>
@@ -182,6 +197,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
        {selectedBadge && (() => {
          const isUnlocked = stats.badges.includes(selectedBadge.id);
          const Icon = IconMap[selectedBadge.icon] || Shield;
+         const currentVal = (selectedBadge.statKey ? stats[selectedBadge.statKey] : 0) as number;
+         const threshold = selectedBadge.threshold || 1;
+         const currentProgress = Math.min(currentVal, threshold);
          
          return (
            <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -217,7 +235,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                                ? 'bg-green-500/10 text-green-600 border-green-500/20' 
                                : 'bg-tg-secondaryBg text-tg-hint border-tg-hint/10'
                            }`}>
-                               {isUnlocked ? 'Unlocked' : 'Locked'}
+                               {isUnlocked ? 'Unlocked' : `${currentProgress} / ${threshold}`}
                            </div>
                            
                            <div className="bg-tg-secondaryBg/50 p-4 rounded-2xl border border-tg-hint/5">

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, ArrowRight, CornerDownLeft } from 'lucide-react';
-import { SearchHistoryItem } from '../types.ts';
+import { SearchHistoryItem } from '../types';
 
 interface SearchBarProps {
   onSearch: (term: string) => void;
@@ -124,7 +124,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
              >
                <span className="flex items-center gap-2">
                  {isLoading ? <span className="animate-spin">⏳</span> : <Search size={18} />}
-                 Search API for "{query}"
+                 Search
                </span>
                <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
              </button>
