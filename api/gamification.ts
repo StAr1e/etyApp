@@ -1,4 +1,4 @@
-import { connectToDatabase, User } from '../lib/mongodb';
+import { connectToDatabase, User } from '../lib/mongodb.js';
 
 // --- CONSTANTS ---
 const XP_ACTIONS: Record<string, number> = {
