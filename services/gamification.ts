@@ -32,42 +32,42 @@ export const BADGES: Record<BadgeId, Badge> = {
     name: 'First Discovery',
     description: 'Searched for your first word.',
     icon: 'Search',
-    color: 'text-blue-500 bg-blue-100'
+    color: 'from-blue-400 to-blue-600'
   },
   explorer_10: {
     id: 'explorer_10',
     name: 'Explorer',
     description: 'Discovered 10 unique words.',
     icon: 'Map',
-    color: 'text-green-500 bg-green-100'
+    color: 'from-emerald-400 to-teal-600'
   },
   linguist_50: {
     id: 'linguist_50',
     name: 'Linguist',
     description: 'A true lover of words. 50 discoveries.',
     icon: 'BookOpen',
-    color: 'text-purple-500 bg-purple-100'
+    color: 'from-violet-400 to-purple-600'
   },
   deep_diver: {
     id: 'deep_diver',
     name: 'Deep Diver',
     description: 'Generated 5 AI deep dive summaries.',
     icon: 'Anchor',
-    color: 'text-cyan-500 bg-cyan-100'
+    color: 'from-cyan-400 to-blue-500'
   },
   social_butterfly: {
     id: 'social_butterfly',
     name: 'Town Crier',
     description: 'Shared knowledge with others 3 times.',
     icon: 'Share2',
-    color: 'text-pink-500 bg-pink-100'
+    color: 'from-pink-400 to-rose-600'
   },
   daily_streak_3: {
     id: 'daily_streak_3',
     name: 'Consistent',
     description: 'Used the app for 3 days in a row.',
     icon: 'Flame',
-    color: 'text-orange-500 bg-orange-100'
+    color: 'from-amber-400 to-orange-600'
   }
 };
 
@@ -138,13 +138,8 @@ export const trackAction = async (
 
 export const fetchLeaderboard = async (user: TelegramUser | null, stats: UserStats): Promise<LeaderboardEntry[]> => {
   try {
-    // We send a POST request with the 'LEADERBOARD' action.
-    // We include the current user's data so the server can inject it into the response 
-    // if the server memory was reset (Serverless Cold Start).
-    
     const body: any = {
       action: 'LEADERBOARD',
-      // If user exists, send their details to ensure they appear on list
       ...(user && {
         userId: user.id,
         name: user.first_name,

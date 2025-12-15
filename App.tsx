@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
@@ -7,7 +6,7 @@ import { LeaderboardModal } from './components/LeaderboardModal';
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -247,37 +246,57 @@ export default function App() {
         {/* Top Bar: Split Layout (Stats Left, User Right) */}
         <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
            
-           {/* Level / XP Bar */}
-           <button onClick={() => setShowProfile(true)} className="flex items-center gap-3 group">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-tg-button to-purple-500 flex items-center justify-center text-white font-bold shadow-lg border-2 border-tg-bg">
+           {/* Enhanced Level / XP Pill */}
+           <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 group">
+              <div className="relative w-10 h-10">
+                 {/* Progress Ring Background */}
+                 <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
+                    <path className="text-tg-secondaryBg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                    <path 
+                      className="text-tg-button transition-all duration-1000 ease-out" 
+                      strokeDasharray={`${nextLevelProgress}, 100`} 
+                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="4"
+                      strokeLinecap="round" 
+                    />
+                 </svg>
+                 <div className="absolute inset-0 flex items-center justify-center font-black text-sm text-tg-text">
                    {userStats.level}
-                </div>
-                {userStats.badges.length > 0 && (
-                   <div className="absolute -bottom-1 -right-1 bg-yellow-400 text-yellow-900 p-0.5 rounded-full border border-tg-bg">
-                      <Crown size={10} fill="currentColor" />
-                   </div>
-                )}
-              </div>
-              <div className="flex flex-col items-start">
-                 <span className="text-xs font-bold text-tg-text group-hover:text-tg-button transition-colors">{levelInfo.title}</span>
-                 <div className="w-24 h-1.5 bg-tg-secondaryBg rounded-full mt-1 overflow-hidden">
-                    <div className="h-full bg-tg-button rounded-full transition-all duration-500" style={{ width: `${nextLevelProgress}%` }}></div>
                  </div>
+                 {userStats.badges.length > 0 && (
+                   <div className="absolute -bottom-1 -right-1 text-yellow-500 drop-shadow-sm">
+                      <Crown size={12} fill="currentColor" />
+                   </div>
+                 )}
+              </div>
+              
+              <div className="flex flex-col items-start leading-none">
+                 <span className="text-[10px] font-bold text-tg-hint uppercase tracking-wider">Level {userStats.level}</span>
+                 <span className="text-sm font-bold text-tg-text group-hover:text-tg-button transition-colors truncate max-w-[120px]">
+                   {levelInfo.title}
+                 </span>
               </div>
            </button>
            
            {/* User Profile / Login */}
            {user ? (
-             <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-2 pr-3 py-1.5 rounded-full shadow-sm animate-in fade-in cursor-pointer hover:bg-tg-button/5 transition-colors backdrop-blur-md bg-opacity-80">
+             <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-1 pr-3 py-1 rounded-full shadow-sm animate-in fade-in cursor-pointer hover:bg-tg-button/5 transition-colors backdrop-blur-md bg-opacity-80">
                {user.photo_url ? (
-                 <img src={user.photo_url} alt="Profile" className="w-6 h-6 rounded-full ring-2 ring-white dark:ring-black" />
+                 <img src={user.photo_url} alt="Profile" className="w-8 h-8 rounded-full ring-2 ring-white dark:ring-black object-cover" />
                ) : (
-                 <div className="w-6 h-6 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold">
+                 <div className="w-8 h-8 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-xs font-bold ring-2 ring-white dark:ring-black">
                    {user.first_name[0]}
                  </div>
                )}
-               <span className="text-sm font-semibold text-tg-text truncate max-w-[100px]">{user.first_name}</span>
+               <div className="flex flex-col items-start leading-none">
+                 <span className="text-xs font-bold text-tg-text truncate max-w-[80px]">{user.first_name}</span>
+                 <span className="text-[10px] text-tg-hint font-medium flex items-center gap-0.5">
+                   <Zap size={8} className="text-yellow-500 fill-yellow-500" />
+                   {userStats.xp}
+                 </span>
+               </div>
              </button>
            ) : (
              <button 
@@ -389,10 +408,15 @@ export default function App() {
 
       {/* Level Up Toast */}
       {levelUpToast.show && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top duration-500">
-           <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-6 py-3 rounded-full shadow-xl flex items-center gap-3 font-bold border-2 border-white/30">
-              <Trophy size={20} className="animate-bounce" />
-              <span>Level Up! Rank {levelUpToast.level} Achieved!</span>
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top duration-500 w-[90%] max-w-sm">
+           <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white p-4 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-white/20">
+              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white animate-bounce">
+                <Trophy size={24} fill="currentColor" />
+              </div>
+              <div>
+                <div className="font-black text-lg uppercase tracking-wide">Level Up!</div>
+                <div className="text-sm font-medium opacity-95">You reached Rank {levelUpToast.level}</div>
+              </div>
            </div>
         </div>
       )}
