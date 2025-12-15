@@ -20,6 +20,8 @@ export interface WordData {
 export interface SearchHistoryItem {
   word: string;
   timestamp: number;
+  data?: WordData; // Persisted full data
+  summary?: string; // Persisted AI summary
 }
 
 // --- Gamification Types ---

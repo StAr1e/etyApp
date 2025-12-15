@@ -3,10 +3,11 @@ import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
 import { ProfileModal } from './components/ProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
+import { HistoryModal } from './components/HistoryModal'; // Import new modal
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -20,6 +21,7 @@ export default function App() {
   const [userStats, setUserStats] = useState<UserStats>(INITIAL_STATS);
   const [showProfile, setShowProfile] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false); // New State
   const [levelUpToast, setLevelUpToast] = useState<{show: boolean, level: number}>({show: false, level: 0});
   
   // Summary State
@@ -73,12 +75,17 @@ export default function App() {
 
      if (showLeaderboard) {
        setShowLeaderboard(false);
-       if (view === 'home') setShowProfile(true); // Return to profile if we were there
+       if (view === 'home') setShowProfile(true); 
        return;
      }
 
      if (showProfile) {
        setShowProfile(false);
+       return;
+     }
+
+     if (showHistoryModal) {
+       setShowHistoryModal(false);
        return;
      }
 
@@ -88,7 +95,7 @@ export default function App() {
      if (window.Telegram?.WebApp) {
        window.Telegram.WebApp.HapticFeedback.selectionChanged();
      }
-  }, [showSummaryModal, showProfile, showLeaderboard, view]);
+  }, [showSummaryModal, showProfile, showLeaderboard, showHistoryModal, view]);
 
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
@@ -104,13 +111,24 @@ export default function App() {
       setShowSummaryModal(true);
       if(user) handleGamificationAction('SUMMARY'); 
       
+      // Update History with the new summary
+      const updatedHistory = history.map(item => {
+        if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
+           // We prioritize the most recent, but generally just update the existing one if we just searched it
+           return { ...item, summary: text };
+        }
+        return item;
+      });
+      setHistory(updatedHistory);
+      localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
+      
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hide();
     } catch (e) {
       console.error(e);
     } finally {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
-  }, [wordData, user, userStats]); // dependencies
+  }, [wordData, user, history]); // Added history dependency
 
   const handleSearch = async (term: string) => {
     if (!term) return;
@@ -127,9 +145,15 @@ export default function App() {
       setView('result');
       if(user) handleGamificationAction('SEARCH'); 
 
-      // Update History: Filter out duplicate, add new to top, slice to 50
+      // Update History: Filter out duplicate, add new with FULL DATA, slice to 50
+      const newItem: SearchHistoryItem = { 
+        word: data.word, 
+        timestamp: Date.now(),
+        data: data // Save full data for offline/history view
+      };
+
       const newHistory = [
-        { word: data.word, timestamp: Date.now() },
+        newItem,
         ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
       ].slice(0, 50); 
       
@@ -143,6 +167,31 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Restores a word from history without API call
+  const handleRestoreFromHistory = (item: SearchHistoryItem) => {
+     if (item.data) {
+       setWordData(item.data);
+       setSummary(item.summary || null);
+       setView('result');
+       setShowHistoryModal(false);
+     } else {
+       // Legacy history item without data -> fetch it
+       setShowHistoryModal(false);
+       handleSearch(item.word);
+     }
+  };
+
+  const handleDeleteHistory = (timestamp: number) => {
+     const newHistory = history.filter(h => h.timestamp !== timestamp);
+     setHistory(newHistory);
+     localStorage.setItem('ety_history', JSON.stringify(newHistory));
+  };
+
+  const handleClearHistory = () => {
+     setHistory([]);
+     localStorage.removeItem('ety_history');
   };
 
   // --- Lifecycle & Telegram SDK ---
@@ -171,7 +220,11 @@ export default function App() {
     // 2. Load History
     const saved = localStorage.getItem('ety_history');
     if (saved) {
-      setHistory(JSON.parse(saved));
+      try {
+        setHistory(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse history", e);
+      }
     }
 
     // 3. Handle Deep Linking
@@ -201,7 +254,7 @@ export default function App() {
     const onMainBtnClick = () => handleGenerateSummary();
     const onBackBtnClick = () => handleBack();
 
-    if (view === 'result' && !showProfile && !showLeaderboard) {
+    if (view === 'result' && !showProfile && !showLeaderboard && !showHistoryModal) {
       tg.BackButton.show();
       tg.BackButton.onClick(onBackBtnClick);
 
@@ -212,7 +265,7 @@ export default function App() {
         tg.MainButton.hide();
       }
 
-    } else if (showProfile || showLeaderboard) {
+    } else if (showProfile || showLeaderboard || showHistoryModal) {
        tg.BackButton.show();
        tg.BackButton.onClick(onBackBtnClick);
        tg.MainButton.hide();
@@ -227,7 +280,7 @@ export default function App() {
       tg.MainButton.offClick(onMainBtnClick);
       tg.BackButton.offClick(onBackBtnClick);
     };
-  }, [view, showSummaryModal, showProfile, showLeaderboard, handleGenerateSummary, handleBack]);
+  }, [view, showSummaryModal, showProfile, showLeaderboard, showHistoryModal, handleGenerateSummary, handleBack]);
 
   const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
   const levelInfo = getLevelInfo(userStats.xp);
@@ -243,42 +296,53 @@ export default function App() {
       {/* Content Container */}
       <div className="w-full max-w-2xl mx-auto relative z-10 min-h-screen flex flex-col p-4 md:p-6">
         
-        {/* Top Bar: Split Layout (Stats Left, User Right) */}
+        {/* Top Bar: Split Layout (History/Stats Left, User Right) */}
         <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
            
-           {/* Enhanced Level / XP Pill */}
-           <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 group">
-              <div className="relative w-10 h-10">
-                 {/* Progress Ring Background */}
-                 <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
-                    <path className="text-tg-secondaryBg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
-                    <path 
-                      className="text-tg-button transition-all duration-1000 ease-out" 
-                      strokeDasharray={`${nextLevelProgress}, 100`} 
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" 
-                      fill="none" 
-                      stroke="currentColor" 
-                      strokeWidth="4"
-                      strokeLinecap="round" 
-                    />
-                 </svg>
-                 <div className="absolute inset-0 flex items-center justify-center font-black text-sm text-tg-text">
-                   {userStats.level}
-                 </div>
-                 {userStats.badges.length > 0 && (
-                   <div className="absolute -bottom-1 -right-1 text-yellow-500 drop-shadow-sm">
-                      <Crown size={12} fill="currentColor" />
+           <div className="flex items-center gap-3">
+             {/* History Button */}
+             <button 
+                onClick={() => setShowHistoryModal(true)}
+                className="w-10 h-10 rounded-full bg-tg-secondaryBg border border-tg-hint/10 flex items-center justify-center text-tg-text shadow-sm hover:bg-tg-button/10 transition-colors"
+                title="Search History"
+             >
+                <Clock size={20} />
+             </button>
+
+             {/* Enhanced Level / XP Pill */}
+             <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 group">
+                <div className="relative w-10 h-10">
+                   {/* Progress Ring Background */}
+                   <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
+                      <path className="text-tg-secondaryBg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
+                      <path 
+                        className="text-tg-button transition-all duration-1000 ease-out" 
+                        strokeDasharray={`${nextLevelProgress}, 100`} 
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" 
+                        fill="none" 
+                        stroke="currentColor" 
+                        strokeWidth="4"
+                        strokeLinecap="round" 
+                      />
+                   </svg>
+                   <div className="absolute inset-0 flex items-center justify-center font-black text-sm text-tg-text">
+                     {userStats.level}
                    </div>
-                 )}
-              </div>
-              
-              <div className="flex flex-col items-start leading-none">
-                 <span className="text-[10px] font-bold text-tg-hint uppercase tracking-wider">Level {userStats.level}</span>
-                 <span className="text-sm font-bold text-tg-text group-hover:text-tg-button transition-colors truncate max-w-[120px]">
-                   {levelInfo.title}
-                 </span>
-              </div>
-           </button>
+                   {userStats.badges.length > 0 && (
+                     <div className="absolute -bottom-1 -right-1 text-yellow-500 drop-shadow-sm">
+                        <Crown size={12} fill="currentColor" />
+                     </div>
+                   )}
+                </div>
+                
+                <div className="hidden sm:flex flex-col items-start leading-none">
+                   <span className="text-[10px] font-bold text-tg-hint uppercase tracking-wider">Level {userStats.level}</span>
+                   <span className="text-sm font-bold text-tg-text group-hover:text-tg-button transition-colors truncate max-w-[120px]">
+                     {levelInfo.title}
+                   </span>
+                </div>
+             </button>
+           </div>
            
            {/* User Profile / Login */}
            {user ? (
@@ -340,7 +404,15 @@ export default function App() {
               onSearch={handleSearch} 
               isLoading={isLoading} 
               history={history}
-              onHistorySelect={(term) => handleSearch(term)}
+              onHistorySelect={(term) => {
+                 // Try to find full data in history first
+                 const historyItem = history.find(h => h.word.toLowerCase() === term.toLowerCase());
+                 if (historyItem) {
+                    handleRestoreFromHistory(historyItem);
+                 } else {
+                    handleSearch(term);
+                 }
+              }}
             />
           </div>
 
@@ -478,6 +550,17 @@ export default function App() {
           onClose={() => setShowLeaderboard(false)} 
           currentUser={user}
           currentStats={userStats}
+        />
+      )}
+
+      {/* History Modal */}
+      {showHistoryModal && (
+        <HistoryModal 
+           history={history}
+           onClose={() => setShowHistoryModal(false)}
+           onSelect={handleRestoreFromHistory}
+           onClear={handleClearHistory}
+           onDelete={handleDeleteHistory}
         />
       )}
     </div>
