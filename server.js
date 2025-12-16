@@ -142,7 +142,7 @@ app.get('/api/details', async (req, res) => {
 
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-flash-lite-latest',
+            model: 'gemini-2.5-flash',
             contents: `Analyze "${word}" for etymology app.`,
             config: { responseMimeType: 'application/json', responseSchema: schema }
         });
@@ -165,7 +165,7 @@ app.get('/api/summary', async (req, res) => {
 
     try {
         const result = await ai.models.generateContent({
-            model: 'gemini-flash-lite-latest',
+            model: 'gemini-2.5-flash',
             contents: `Story-style etymology summary of "${word}". Max 150 words.`,
         });
         const text = result.text;

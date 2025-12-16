@@ -67,6 +67,24 @@ const checkBadges = (stats: any) => {
   return newBadges;
 };
 
+// Retry wrapper for optimistic concurrency control
+const executeWithRetry = async (operation: () => Promise<any>, retries = 3) => {
+  let lastError;
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+      // Retry on VersionError (concurrency) or Duplicate Key (race condition on create)
+      if (error.name === 'VersionError' || error.code === 11000) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+};
+
 export default async function handler(request: any, response: any) {
   try {
     const db = await connectToDatabase();
@@ -82,33 +100,42 @@ export default async function handler(request: any, response: any) {
       
       const idStr = userId.toString();
 
-      // Find or Create
-      let user = await User.findOne({ userId: idStr });
-      
-      if (!user) {
-        user = await User.create({
-          userId: idStr,
-          profile: { name: name || 'Explorer', photo: photo || '' },
-          stats: { ...INITIAL_STATS },
-          searchHistory: []
+      try {
+        const data = await executeWithRetry(async () => {
+          // Find or Create
+          let user = await User.findOne({ userId: idStr });
+          
+          if (!user) {
+            user = await User.create({
+              userId: idStr,
+              profile: { name: name || 'Explorer', photo: photo || '' },
+              stats: { ...INITIAL_STATS },
+              searchHistory: []
+            });
+          } else {
+            // Update profile info if changed
+            if (name) user.profile.name = name;
+            if (photo) user.profile.photo = photo;
+          }
+
+          // Check Streak
+          const streakXp = updateStreak(user.stats);
+          if (streakXp > 0 || name || photo) {
+            user.markModified('stats'); 
+            await user.save();
+          }
+
+          return {
+            stats: user.stats,
+            history: user.searchHistory || []
+          };
         });
-      } else {
-        // Update profile info if changed
-        if (name) user.profile.name = name;
-        if (photo) user.profile.photo = photo;
-      }
 
-      // Check Streak
-      const streakXp = updateStreak(user.stats);
-      if (streakXp > 0 || name || photo) {
-        user.markModified('stats'); 
-        await user.save();
+        return response.status(200).json(data);
+      } catch (e: any) {
+        console.error("GET Stats Error:", e);
+        return response.status(500).json({ error: "Failed to fetch stats" });
       }
-
-      return response.status(200).json({
-        stats: user.stats,
-        history: user.searchHistory || []
-      });
     }
 
     // --- POST ACTIONS ---
@@ -117,6 +144,9 @@ export default async function handler(request: any, response: any) {
       if (!action) return response.status(400).json({ error: "Missing action" });
 
       // --- LEADERBOARD ACTION ---
+      // Leaderboard uses findOneAndUpdate which is atomic, so usually safe without retry loop for VersionError,
+      // but we wrap it for robustness against connection glitches or other transient issues if needed.
+      // However, simplified here as it's less prone to the specific VersionError seen.
       if (action === 'LEADERBOARD') {
         if (userId) {
           const idStr = userId.toString();
@@ -157,96 +187,111 @@ export default async function handler(request: any, response: any) {
       if (!userId) return response.status(400).json({ error: "userId required" });
       const idStr = userId.toString();
 
-      let user = await User.findOne({ userId: idStr });
-      if (!user) {
-         user = new User({
-           userId: idStr,
-           profile: { name: name || 'Explorer', photo: photo || '' },
-           stats: { ...INITIAL_STATS },
-           searchHistory: []
-         });
-      }
-
-      const stats = user.stats;
-      const previousLevel = stats.level;
-
-      // Apply Action XP
-      const xpGain = XP_ACTIONS[action] || 0;
-      stats.xp += xpGain;
-
-      if (action === 'SEARCH') {
-        stats.wordsDiscovered++;
-        // Save Search History
-        if (payload && payload.wordData) {
-           // Remove duplicates
-           if (!user.searchHistory) user.searchHistory = [];
-           user.searchHistory = user.searchHistory.filter(item => 
-             item.word.toLowerCase() !== payload.wordData.word.toLowerCase()
-           );
-           // Add new to top
-           user.searchHistory.unshift({
-             word: payload.wordData.word,
-             timestamp: Date.now(),
-             data: payload.wordData,
-             summary: payload.summary || '',
-             image: '' // Init empty
-           });
-           // Limit to 50
-           if (user.searchHistory.length > 50) {
-             user.searchHistory = user.searchHistory.slice(0, 50);
-           }
-        }
-      }
-
-      if (action === 'SUMMARY') {
-        stats.summariesGenerated++;
-        // Update Summary in History
-        if (payload && payload.word && payload.summary) {
-          if (!user.searchHistory) user.searchHistory = [];
-          const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
-          if (idx !== -1) {
-             user.searchHistory[idx].summary = payload.summary;
+      try {
+        const result = await executeWithRetry(async () => {
+          let user = await User.findOne({ userId: idStr });
+          if (!user) {
+             user = new User({
+               userId: idStr,
+               profile: { name: name || 'Explorer', photo: photo || '' },
+               stats: { ...INITIAL_STATS },
+               searchHistory: []
+             });
+             // We can save here immediately to establish the user, but we'll modify and save at the end.
           }
-        }
-      }
 
-      if (action === 'IMAGE') {
-          // No XP for image loading, but we update history
-          if (payload && payload.word && payload.image) {
+          const stats = user.stats;
+          const previousLevel = stats.level;
+
+          // Apply Action XP
+          const xpGain = XP_ACTIONS[action] || 0;
+          stats.xp += xpGain;
+
+          if (action === 'SEARCH') {
+            stats.wordsDiscovered++;
+            // Save Search History
+            if (payload && payload.wordData) {
+               // Ensure array exists
+               if (!user.searchHistory) user.searchHistory = [];
+               
+               // Remove duplicates (create new array to ensure change detection)
+               const existing = user.searchHistory.filter(item => 
+                 item.word.toLowerCase() !== payload.wordData.word.toLowerCase()
+               );
+               
+               // Add new to top
+               user.searchHistory = [{
+                 word: payload.wordData.word,
+                 timestamp: Date.now(),
+                 data: payload.wordData,
+                 summary: payload.summary || '',
+                 image: '' 
+               }, ...existing];
+               
+               // Limit to 50
+               if (user.searchHistory.length > 50) {
+                 user.searchHistory = user.searchHistory.slice(0, 50);
+               }
+            }
+          }
+
+          if (action === 'SUMMARY') {
+            stats.summariesGenerated++;
+            if (payload && payload.word && payload.summary) {
               if (!user.searchHistory) user.searchHistory = [];
               const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
               if (idx !== -1) {
-                  user.searchHistory[idx].image = payload.image;
+                 // Direct modification of array element requires markModified
+                 user.searchHistory[idx].summary = payload.summary;
+              }
+            }
+          }
+
+          if (action === 'IMAGE') {
+              if (payload && payload.word && payload.image) {
+                  if (!user.searchHistory) user.searchHistory = [];
+                  const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
+                  if (idx !== -1) {
+                      user.searchHistory[idx].image = payload.image;
+                  }
               }
           }
+
+          if (action === 'SHARE') stats.shares++;
+
+          // Recalculate Level
+          stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
+
+          // Check Badges
+          const newBadges = checkBadges(stats);
+          
+          stats.lastVisit = Date.now();
+          
+          user.markModified('stats');
+          user.markModified('searchHistory'); // Critical for nested array changes
+          
+          await user.save();
+
+          return {
+             stats,
+             history: user.searchHistory,
+             newBadges,
+             leveledUp: stats.level > previousLevel
+          };
+        });
+
+        return response.status(200).json(result);
+
+      } catch (e: any) {
+        console.error("POST Gamification Error:", e);
+        return response.status(500).json({ error: "Failed to update stats" });
       }
-
-      if (action === 'SHARE') stats.shares++;
-
-      // Recalculate Level
-      stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
-
-      // Check Badges
-      const newBadges = checkBadges(stats);
-      
-      stats.lastVisit = Date.now();
-      
-      user.markModified('stats');
-      user.markModified('searchHistory'); // Explicitly mark history as modified
-      await user.save();
-
-      return response.status(200).json({
-         stats,
-         history: user.searchHistory,
-         newBadges,
-         leveledUp: stats.level > previousLevel
-      });
     }
 
     return response.status(405).json({ error: "Method not allowed" });
 
   } catch (error: any) {
-    console.error("Gamification API Error", error);
+    console.error("Gamification API Global Error", error);
     return response.status(500).json({ error: "Internal Server Error" });
   }
 }
