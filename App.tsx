@@ -477,8 +477,7 @@ export default function App() {
                  <span className="font-serif font-black text-4xl">Æ</span>
                </div>
              </div>
-             <h1 className="text-3xl md:text-4xl font-black tracking-tight text-tg-text mb-2">Ety.ai</h1>
-             <p className="text-tg-hint font-medium text-base">Uncover the stories behind words</p>
+             <p className="text-tg-hint font-medium text-base mt-2">Uncover the stories behind words</p>
           </div>
         </header>
 
