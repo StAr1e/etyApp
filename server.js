@@ -176,8 +176,7 @@ app.get('/api/summary', async (req, res) => {
 });
 
 app.post('/api/image', async (req, res) => {
-    if (!ai) return res.status(500).json({ error: "Server missing API Key" });
-    const { word, etymology } = req.body;
+    const { word, etymology, definition } = req.body;
     if (!word) return res.status(400).json({ error: "Word required" });
 
     const cleanWord = word.trim().toLowerCase();
@@ -185,28 +184,21 @@ app.post('/api/image', async (req, res) => {
     if (cached) return res.json({ image: cached });
 
     try {
-        const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology ? etymology.substring(0, 300) : 'Abstract representation'}. The image should be a symbolic, visual interpretation without any text.`;
+        const contextText = definition || etymology || 'Abstract representation';
+        const context = contextText.split('.')[0].substring(0, 100).replace(/[^a-zA-Z0-9 ]/g, ' ');
+        const prompt = `cute flat vector illustration representing the meaning of the word "${word}", context: ${context}, cartoon style, bright colors, educational illustration, clean background, modern infographic style`;
         
-        const result = await ai.models.generateContent({
-            model: 'gemini-2.5-flash-image',
-            contents: { parts: [{ text: prompt }] },
-        });
+        const encodedPrompt = encodeURIComponent(prompt);
+        const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=768&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
 
-        let base64Image = null;
-        if (result.candidates?.[0]?.content?.parts) {
-            for (const part of result.candidates[0].content.parts) {
-                if (part.inlineData && part.inlineData.data) {
-                    base64Image = part.inlineData.data;
-                    break;
-                }
-            }
-        }
+        const imgRes = await fetch(url);
+        const arrayBuffer = await imgRes.arrayBuffer();
+        const base64Image = Buffer.from(arrayBuffer).toString('base64');
 
         if (base64Image) {
             setCache(imageCache, cleanWord, base64Image);
             res.json({ image: base64Image });
         } else {
-            console.error("No image generated:", JSON.stringify(result));
             res.status(500).json({ error: "No image data" });
         }
     } catch (e) {

@@ -62,7 +62,8 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
     setImageError(null);
     setIsImageLoading(true);
     try {
-      const b64 = await fetchWordImage(data.word, data.etymology);
+      // Pass definition instead of etymology for better visual meaning
+      const b64 = await fetchWordImage(data.word, data.definition);
       if (b64) {
         setAiImage(`data:image/jpeg;base64,${b64}`);
       } else {
@@ -78,7 +79,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
     } finally {
       setIsImageLoading(false);
     }
-  }, [data.word, data.etymology]);
+  }, [data.word, data.definition]);
 
   useEffect(() => {
     loadImage();
@@ -217,210 +218,167 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
         </div>
 
         {/* AI IMAGE DISPLAY */}
-        <div className="relative z-10 w-full aspect-square md:aspect-[2/1] rounded-2xl overflow-hidden mb-8 bg-tg-secondaryBg border border-tg-hint/5 shadow-inner group-image">
+        <div className="relative z-10 mb-8 w-full aspect-square md:aspect-video rounded-2xl overflow-hidden bg-tg-secondaryBg border border-tg-hint/10 shadow-inner group-hover:shadow-md transition-shadow">
            {isImageLoading ? (
-             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-tg-hint/50">
-                <Loader2 size={32} className="animate-spin" />
-                <span className="text-xs font-medium uppercase tracking-widest animate-pulse">Dreaming up image...</span>
+             <div className="w-full h-full flex flex-col items-center justify-center text-tg-hint animate-pulse">
+                <Loader2 size={32} className="animate-spin mb-2 text-tg-button" />
+                <span className="text-xs font-bold uppercase tracking-wider">Dreaming up visual...</span>
              </div>
            ) : aiImage ? (
-             <img src={aiImage} alt="AI Generated visualization" className="w-full h-full object-cover animate-in fade-in duration-700 hover:scale-105 transition-transform duration-1000 ease-in-out" />
+             <div className="relative w-full h-full group/img">
+               <img 
+                 src={aiImage} 
+                 alt={`AI visualization of ${data.word}`} 
+                 className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-105" 
+               />
+               <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity"></div>
+             </div>
            ) : (
-             <div className="absolute inset-0 flex flex-col items-center justify-center text-tg-hint/40 gap-3 p-4 text-center">
+             <div className="w-full h-full flex flex-col items-center justify-center text-tg-hint/50 p-6 text-center">
                 {imageError === 'quota_exceeded' ? (
-                   <>
-                     <CloudOff size={24} className="opacity-50 text-amber-500" />
-                     <span className="text-xs font-bold text-tg-hint">Daily image limit reached</span>
-                     <span className="text-[10px] opacity-60">High demand. Try again tomorrow!</span>
-                   </>
+                    <>
+                       <CloudOff size={32} className="mb-2" />
+                       <span className="text-xs font-bold">Image Quota Limit</span>
+                    </>
                 ) : (
-                   <>
-                      <span className="text-xs">No visualization available</span>
-                      <button 
-                        onClick={loadImage}
-                        className="px-3 py-1.5 rounded-full bg-tg-bg border border-tg-hint/20 text-xs font-bold flex items-center gap-1 hover:bg-tg-secondaryBg transition-colors"
-                      >
-                         <RefreshCw size={12} /> Retry
-                      </button>
-                   </>
+                    <>
+                       <RefreshCw size={32} className="mb-2 cursor-pointer hover:text-tg-button transition-colors" onClick={loadImage} />
+                       <span className="text-xs font-bold">Tap to retry image</span>
+                    </>
                 )}
              </div>
            )}
-           {aiImage && (
-             <div className="absolute bottom-3 right-3 px-2 py-1 bg-black/40 backdrop-blur-md rounded-md text-[8px] text-white/80 font-bold uppercase tracking-wider border border-white/10">
-               AI Generated
-             </div>
-           )}
         </div>
 
-        {/* DEFINITION */}
-        <div className="relative z-10 pl-6 mb-8 border-l-4 border-tg-button/30">
-           <p className="text-xl md:text-2xl leading-relaxed text-tg-text font-serif">
-              {data.definition}
-           </p>
-        </div>
-
-        {/* FULL AUDIO PLAYER */}
-        <div className="relative z-10 bg-tg-secondaryBg/50 rounded-2xl p-4 border border-tg-hint/10 flex items-center gap-4">
-           {/* Play/Pause */}
+        {/* Audio Player */}
+        <div className="relative z-10 bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border border-tg-hint/5">
            <button 
              onClick={handleTogglePlay}
              disabled={isAudioLoading}
-             className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-lg transition-all ${
-               isAudioLoading 
-                 ? 'bg-tg-hint/20 cursor-wait' 
-                 : 'bg-tg-button text-white hover:scale-105 active:scale-95'
-             }`}
+             className="w-12 h-12 rounded-full bg-tg-button text-white flex items-center justify-center shadow-lg shadow-tg-button/30 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
            >
-             {isAudioLoading ? (
-               <Loader2 size={20} className="animate-spin" />
-             ) : isPlaying ? (
-               <Pause size={20} fill="currentColor" />
-             ) : (
-               <Play size={20} fill="currentColor" className="ml-1" />
-             )}
+             {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
            </button>
-
-           <div className="flex-1 min-w-0">
-             <div className="text-sm font-bold text-tg-text">Audio Experience</div>
-             <div className="text-xs text-tg-hint truncate">Listen to the full story</div>
+           
+           <div className="flex-1">
+              <div className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-1">Pronunciation</div>
+              <div className="h-1 bg-tg-hint/10 rounded-full overflow-hidden">
+                 <div className={`h-full bg-tg-button/50 rounded-full ${isPlaying ? 'animate-[pulse_1s_ease-in-out_infinite] w-full' : 'w-0'}`}></div>
+              </div>
            </div>
 
-           {/* Controls */}
-           <div className="flex items-center gap-2">
+           <div className="flex gap-1">
+             <button onClick={cycleSpeed} className="p-2 text-tg-hint hover:text-tg-text text-xs font-bold transition-colors w-10 text-center">
+               {playbackRate}x
+             </button>
              {audioBlobUrl && (
-               <>
-                 <button 
-                   onClick={cycleSpeed}
-                   className="px-2 py-1.5 rounded-lg bg-tg-bg border border-tg-hint/10 text-xs font-bold text-tg-text min-w-[3rem] flex items-center justify-center gap-0.5 hover:bg-tg-hint/10 transition-colors"
-                 >
-                   <FastForward size={10} /> {playbackRate}x
-                 </button>
-                 <button 
-                   onClick={handleDownloadAudio}
-                   className="p-2 rounded-lg bg-tg-bg border border-tg-hint/10 text-tg-text hover:bg-tg-hint/10 transition-colors"
-                   title="Download WAV"
-                 >
-                   <Download size={16} />
-                 </button>
-               </>
+                <button onClick={handleDownloadAudio} className="p-2 text-tg-hint hover:text-tg-text transition-colors">
+                  <Download size={18} />
+                </button>
              )}
            </div>
-
-           {/* Hidden Audio Element */}
-           <audio 
-             ref={audioRef} 
-             src={audioBlobUrl || undefined} 
-             onEnded={() => setIsPlaying(false)} 
-             onError={() => { setIsPlaying(false); setIsAudioLoading(false); }}
-             className="hidden"
-           />
         </div>
 
+        {/* Hidden Audio Element */}
+        <audio 
+          ref={audioRef} 
+          src={audioBlobUrl || undefined}
+          onEnded={() => setIsPlaying(false)}
+          onError={() => { setIsPlaying(false); setIsAudioLoading(false); }}
+        />
+        
+        {/* Background Decor */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-tg-button/5 to-purple-500/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
       </div>
 
-      {/* Share Action Block */}
-      <button 
-        onClick={handleShare}
-        className="w-full bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white p-4 rounded-2xl shadow-lg shadow-blue-500/20 flex items-center justify-center gap-3 transition-all active:scale-[0.98] group"
-      >
-        <div className="p-1.5 bg-white/20 rounded-full group-hover:rotate-12 transition-transform">
-          <Users size={20} />
-        </div>
-        <span className="font-bold text-lg">Share Result</span>
-      </button>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* 2. Definition & Etymology */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         
-        {/* 2. Etymology Timeline (Spans 2 cols on large screens) */}
-        <div className="lg:col-span-2 bg-tg-bg rounded-3xl p-6 md:p-8 border border-tg-hint/10 shadow-soft">
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-tg-hint/10">
-            <div className="p-2 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-300 rounded-xl">
-               <GitFork size={24} />
-            </div>
-            <h2 className="text-xl font-bold text-tg-text">Evolution</h2>
-          </div>
-          
-          <p className="text-tg-text/80 leading-relaxed mb-8 font-serif text-lg">
-            {data.etymology}
-          </p>
+        {/* Definition */}
+        <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-sm relative overflow-hidden">
+           <div className="flex items-center gap-3 mb-4 text-tg-button">
+              <div className="p-2 bg-tg-button/10 rounded-lg">
+                <BookOpenCheck size={20} />
+              </div>
+              <h2 className="font-bold text-lg">Meaning</h2>
+           </div>
+           <p className="text-lg leading-relaxed text-tg-text/90 font-serif">
+             {data.definition}
+           </p>
+        </div>
 
-          {/* Timeline Viz */}
-          <div className="relative space-y-0">
-            {data.roots.map((root, idx) => (
-               <div key={idx} className="flex gap-4 relative pb-8 last:pb-0 group">
-                  {/* Line */}
-                  {idx !== data.roots.length && (
-                    <div className="absolute left-[19px] top-8 bottom-0 w-[2px] bg-gradient-to-b from-tg-button/30 to-tg-button/10 group-last:hidden"></div>
-                  )}
-                  
-                  {/* Dot */}
-                  <div className="relative shrink-0 w-10 h-10 flex items-center justify-center">
-                    <div className="w-4 h-4 rounded-full border-[3px] border-tg-button bg-tg-bg z-10 shadow-[0_0_0_4px_var(--tg-theme-bg-color)]"></div>
-                  </div>
-                  
-                  {/* Content */}
-                  <div className="flex-1 pt-1">
-                    <div className="bg-tg-secondaryBg/50 hover:bg-tg-secondaryBg border border-tg-hint/5 rounded-xl p-4 transition-colors">
-                      <div className="flex flex-wrap items-baseline gap-2 mb-1">
-                        <span className="font-bold text-lg text-tg-text capitalize font-serif italic">{root.term}</span>
-                        <span className="text-xs font-bold text-tg-hint uppercase bg-tg-hint/10 px-2 py-0.5 rounded">{root.language}</span>
-                      </div>
-                      <span className="text-tg-text/70 text-sm">"{root.meaning}"</span>
-                    </div>
-                  </div>
-               </div>
-            ))}
+        {/* Etymology */}
+        <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-sm relative overflow-hidden">
+           <div className="flex items-center gap-3 mb-4 text-purple-600">
+              <div className="p-2 bg-purple-500/10 rounded-lg">
+                <GitFork size={20} />
+              </div>
+              <h2 className="font-bold text-lg">Origin Story</h2>
+           </div>
+           <p className="text-base leading-relaxed text-tg-text/80">
+             {data.etymology}
+           </p>
+        </div>
+      </div>
+
+      {/* 3. Roots Trace */}
+      <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-sm">
+         <div className="flex items-center gap-3 mb-6 text-amber-600">
+            <div className="p-2 bg-amber-500/10 rounded-lg">
+               <Users size={20} />
+            </div>
+            <h2 className="font-bold text-lg">Ancestry</h2>
+         </div>
+         
+         <div className="relative">
+            {/* Connecting Line */}
+            <div className="absolute top-8 left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-tg-hint/20 to-transparent hidden md:block"></div>
             
-            {/* Final Target */}
-            <div className="flex gap-4 relative pt-8">
-               <div className="relative shrink-0 w-10 h-10 flex items-center justify-center">
-                 <div className="w-3 h-3 rounded-full bg-tg-text z-10"></div>
-                 <div className="absolute top-0 left-1/2 -ml-[1px] h-8 w-[2px] bg-gradient-to-b from-tg-button/10 to-transparent"></div>
-               </div>
-               <div className="flex-1">
-                 <div className="inline-block px-4 py-2 bg-tg-text text-tg-bg rounded-lg font-bold shadow-md">
-                   {data.word}
+            <div className="flex flex-col md:flex-row justify-between gap-6 md:gap-4 relative z-10">
+               {data.roots.map((root, i) => (
+                 <div key={i} className="flex-1 bg-tg-secondaryBg/50 rounded-2xl p-4 border border-tg-hint/5 flex flex-col items-center text-center hover:bg-tg-secondaryBg transition-colors group">
+                    <span className="text-[10px] font-bold uppercase text-tg-hint mb-1 tracking-widest">{root.language}</span>
+                    <span className="text-xl font-bold text-tg-text mb-1 group-hover:text-tg-button transition-colors font-serif">{root.term}</span>
+                    <span className="text-sm text-tg-hint italic">"{root.meaning}"</span>
+                    
+                    {/* Mobile Down Arrow */}
+                    {i < data.roots.length - 1 && (
+                      <div className="md:hidden mt-4 text-tg-hint/30">↓</div>
+                    )}
                  </div>
+               ))}
+            </div>
+         </div>
+      </div>
+
+      {/* 4. Fun Fact & Synonyms */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+         {/* Fun Fact */}
+         <div className="md:col-span-2 bg-gradient-to-br from-yellow-500/5 to-orange-500/5 rounded-3xl p-6 border border-yellow-500/10 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+               <Lightbulb size={64} className="text-yellow-500" />
+            </div>
+            <div className="relative z-10">
+               <div className="flex items-center gap-2 mb-3 text-yellow-600 font-bold uppercase text-xs tracking-wider">
+                  <Lightbulb size={16} /> Did you know?
                </div>
+               <p className="text-tg-text font-medium italic">
+                 "{data.funFact}"
+               </p>
             </div>
-          </div>
-        </div>
+         </div>
 
-        {/* 3. Sidebar: Context & Facts */}
-        <div className="flex flex-col gap-6">
-          
-          {/* Usage Card */}
-          <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-soft flex-1">
-            <div className="flex items-center gap-2 mb-4 text-tg-text/70">
-              <BookOpenCheck size={20} />
-              <h3 className="font-bold text-sm uppercase tracking-wider">Context</h3>
+         {/* Synonyms */}
+         <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10">
+            <div className="font-bold text-tg-hint text-xs uppercase tracking-wider mb-4">Synonyms</div>
+            <div className="flex flex-wrap gap-2">
+               {data.synonyms.slice(0, 5).map(syn => (
+                 <span key={syn} className="px-3 py-1.5 bg-tg-secondaryBg rounded-lg text-sm text-tg-text font-medium border border-tg-hint/5">
+                   {syn}
+                 </span>
+               ))}
             </div>
-            <ul className="space-y-4">
-              {data.examples.map((ex, i) => (
-                <li key={i} className="relative pl-4 text-tg-text/80 italic text-sm font-serif leading-relaxed">
-                  <div className="absolute left-0 top-2 w-1 h-1 rounded-full bg-tg-hint"></div>
-                  "{ex}"
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Fun Fact Card - Sticky Note Style */}
-          <div className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/20 border border-amber-200 dark:border-amber-800/50 rounded-3xl p-6 shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5">
-              <Lightbulb size={80} />
-            </div>
-            <div className="flex items-center gap-2 mb-3 text-amber-600 dark:text-amber-400">
-              <Lightbulb size={20} fill="currentColor" className="opacity-20" />
-              <h4 className="font-bold text-sm uppercase tracking-wider">Trivia</h4>
-            </div>
-            <p className="text-amber-900 dark:text-amber-100 font-medium leading-relaxed relative z-10">
-              {data.funFact}
-            </p>
-          </div>
-
-        </div>
+         </div>
       </div>
     </div>
   );

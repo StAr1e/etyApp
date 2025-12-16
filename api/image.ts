@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 
 const cache = new Map<string, { data: string, timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -17,15 +16,9 @@ export default async function handler(request: any, response: any) {
     return response.status(200).end();
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
-  
-  if (!apiKey) {
-    console.error("API Key Missing");
-    return response.status(500).json({ error: "Server Configuration Error: API Key missing" });
-  }
-
   // Support both GET (query) and POST (body)
-  const { word, etymology } = request.body && Object.keys(request.body).length > 0 ? request.body : request.query;
+  // We use 'etymology' parameter as context, or definition if passed
+  const { word, etymology, definition } = request.body && Object.keys(request.body).length > 0 ? request.body : request.query;
   
   if (!word) {
     return response.status(400).json({ error: "Word parameter is required" });
@@ -39,61 +32,37 @@ export default async function handler(request: any, response: any) {
       return response.status(200).json({ image: cached.data });
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-
   try {
-    // Construct a prompt that asks for an artistic representation
-    const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology ? etymology.substring(0, 300) : 'Abstract representation'}. The image should be a symbolic, visual interpretation without any text. Cinematic lighting, 8k resolution, photorealistic or highly detailed illustration style.`;
+    // Construct Prompt for Pollinations
+    const contextText = definition || etymology || 'Abstract representation';
+    const context = contextText.split('.')[0].substring(0, 100).replace(/[^a-zA-Z0-9 ]/g, ' ');
+    
+    // Style: "cute flat vector illustration... cartoon style, bright colors, educational illustration, clean background, modern infographic style"
+    const prompt = `cute flat vector illustration representing the meaning of the word "${word}", context: ${context}, cartoon style, bright colors, educational illustration, clean background, modern infographic style`;
+    
+    const encodedPrompt = encodeURIComponent(prompt);
+    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=768&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
 
-    // console.log("Generating image for:", word);
+    const imgRes = await fetch(url);
+    if (!imgRes.ok) throw new Error("Pollinations API Error");
 
-    const result = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: [{ text: prompt }]
-      },
-      // No config for image size/mime type for this model as per docs
-    });
+    const arrayBuffer = await imgRes.arrayBuffer();
+    const base64Image = Buffer.from(arrayBuffer).toString('base64');
 
-    let base64Image = null;
-
-    // Iterate through parts to find the image
-    if (result.candidates?.[0]?.content?.parts) {
-      for (const part of result.candidates[0].content.parts) {
-        if (part.inlineData && part.inlineData.data) {
-          base64Image = part.inlineData.data;
-          break;
+    if (base64Image) {
+        // 2. Set Cache
+        if (cache.size > 50) {
+            const oldestKey = cache.keys().next().value;
+            if(oldestKey) cache.delete(oldestKey);
         }
-      }
-    }
+        cache.set(cleanWord, { data: base64Image, timestamp: Date.now() });
 
-    if (!base64Image) {
-        // Log the full response for debugging (on server side)
-        console.error("No image data in response:", JSON.stringify(result, null, 2));
-        throw new Error("Model returned no image data.");
+        return response.status(200).json({ image: base64Image });
+    } else {
+        throw new Error("No image data received.");
     }
-
-    // 2. Set Cache
-    if (cache.size > 50) {
-        const oldestKey = cache.keys().next().value;
-        if(oldestKey) cache.delete(oldestKey);
-    }
-    cache.set(cleanWord, { data: base64Image, timestamp: Date.now() });
-
-    return response.status(200).json({ image: base64Image });
   } catch (error: any) {
     console.error("Image API Error for word:", word, error);
-    
-    const msg = error.message?.toLowerCase() || "";
-    if (error.status === 429 || msg.includes('429') || msg.includes('quota')) {
-       return response.status(429).json({ error: "Daily Image usage limit reached." });
-    }
-
-    // Safety filter error
-    if (msg.includes("safety") || msg.includes("blocked")) {
-        return response.status(400).json({ error: "Image generation blocked by safety filters." });
-    }
-
     return response.status(500).json({ error: error.message || "Failed to generate image" });
   }
 }
