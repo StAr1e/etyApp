@@ -6,8 +6,11 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export default async function handler(request: any, response: any) {
   const apiKey = process.env.GEMINI_API_KEY;
   
+  // Explicitly fail if no API key is set in Production (Vercel)
   if (!apiKey) {
-    return response.status(500).json({ error: "Server Configuration Error: API Key missing" });
+    return response.status(500).json({ 
+        error: "Server Configuration Error: GEMINI_API_KEY is missing. Please add it to your Vercel Environment Variables." 
+    });
   }
 
   const { word } = request.query;

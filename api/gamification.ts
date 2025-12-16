@@ -77,10 +77,9 @@ const executeWithRetry = async (operation: () => Promise<any>, retries = 5, init
       lastError = error;
       // Retry on VersionError (concurrency) or Duplicate Key (race condition on create)
       if (error.name === 'VersionError' || error.code === 11000) {
-        // Exponential backoff with jitter: 50ms, 100ms, 200ms... + random(0-50ms)
+        // Exponential backoff with jitter: 50ms, 100ms, 200ms...
         const jitter = Math.random() * 50;
         const delay = (initialDelay * Math.pow(2, i)) + jitter;
-        // console.warn(`Concurrency error (attempt ${i + 1}/${retries}). Retrying in ${delay.toFixed(0)}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
@@ -149,7 +148,7 @@ export default async function handler(request: any, response: any) {
       if (!action) return response.status(400).json({ error: "Missing action" });
 
       // --- LEADERBOARD ACTION ---
-      // Leaderboard uses findOneAndUpdate which is atomic, so usually safe without retry loop for VersionError.
+      // Leaderboard uses findOneAndUpdate which is atomic.
       if (action === 'LEADERBOARD') {
         if (userId) {
           const idStr = userId.toString();
@@ -200,7 +199,6 @@ export default async function handler(request: any, response: any) {
                stats: { ...INITIAL_STATS },
                searchHistory: []
              });
-             // Initial save to creation conflicts are handled by retry
              await user.save();
           }
 
@@ -215,10 +213,9 @@ export default async function handler(request: any, response: any) {
             stats.wordsDiscovered++;
             // Save Search History
             if (payload && payload.wordData) {
-               // Ensure array exists
                if (!user.searchHistory) user.searchHistory = [];
                
-               // Remove duplicates (create new array to ensure change detection)
+               // Remove duplicates
                const existing = user.searchHistory.filter(item => 
                  item.word.toLowerCase() !== payload.wordData.word.toLowerCase()
                );
@@ -245,7 +242,6 @@ export default async function handler(request: any, response: any) {
               if (!user.searchHistory) user.searchHistory = [];
               const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
               if (idx !== -1) {
-                 // Direct modification of array element requires markModified
                  user.searchHistory[idx].summary = payload.summary;
               }
             }

@@ -264,7 +264,15 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
        return "Service temporarily unavailable. Please try again later.";
     }
 
-    if (!response.ok) throw new Error("Failed to fetch summary");
+    if (!response.ok) {
+        // Try to read specific error from server JSON
+        let errMsg = "Failed to fetch summary";
+        try {
+            const errJson = await response.json();
+            if (errJson.error) errMsg = errJson.error;
+        } catch (e) {}
+        throw new Error(errMsg);
+    }
     
     const data = await response.json();
     const text = data.summary || "Could not generate summary.";
@@ -273,8 +281,17 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
     saveCache('gemini_summary_cache_v1', summaryCache);
     
     return text;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Fetch Summary Error:", error);
+    
+    // Return the actual error message if it's a configuration/server issue
+    if (error.message?.includes("Configuration") || error.message?.includes("API Key")) {
+        return `⚠️ ${error.message}`;
+    }
+    if (error.message?.includes("limit") || error.message?.includes("quota")) {
+        return "Daily AI usage limit reached. Please try again tomorrow.";
+    }
+    
     return "Sorry, I couldn't generate a summary right now.";
   }
 };
