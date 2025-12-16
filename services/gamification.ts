@@ -1,188 +1,245 @@
-import type { UserStats, LevelInfo, Badge, BadgeId, LeaderboardEntry, TelegramUser, SearchHistoryItem, WordData } from '../types';
+import { GoogleGenAI, Type, Schema, Modality } from "@google/genai";
+import { WordData } from '../types';
 
-// --- SHARED DEFINITIONS (Used by UI for rendering) ---
+// Fix for missing types in current environment
+declare global {
+  interface ImportMetaEnv {
+    VITE_GEMINI_API_KEY?: string;
+    DEV: boolean;
+  }
+  interface ImportMeta {
+    readonly env: ImportMetaEnv;
+  }
+}
 
-export const getLevelInfo = (xp: number): LevelInfo => {
-  // Simple formula: Level = 1 + floor(sqrt(XP / 50))
-  const level = 1 + Math.floor(Math.sqrt(xp / 50));
+// --- CLIENT SIDE CACHE ---
+// Simple in-memory cache to prevent re-fetching the same word in one session
+const wordCache = new Map<string, WordData>();
+const summaryCache = new Map<string, string>();
+const imageCache = new Map<string, string>();
+
+// Helper to decode base64 audio
+const decodeAudio = (base64: string): ArrayBuffer => {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
+// --- SHARED PROMPTS & SCHEMAS ---
+const WORD_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    word: { type: Type.STRING },
+    phonetic: { type: Type.STRING },
+    partOfSpeech: { type: Type.STRING },
+    definition: { type: Type.STRING },
+    etymology: { type: Type.STRING, description: "A concise paragraph explaining the origin history." },
+    roots: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          term: { type: Type.STRING },
+          language: { type: Type.STRING },
+          meaning: { type: Type.STRING },
+        }
+      },
+      description: "List of 2-3 ancestral roots (e.g., Latin, Greek, Old English) leading to this word."
+    },
+    examples: { type: Type.ARRAY, items: { type: Type.STRING } },
+    synonyms: { type: Type.ARRAY, items: { type: Type.STRING } },
+    funFact: { type: Type.STRING, description: "A short, surprising trivia fact about the word." },
+  },
+  required: ["word", "phonetic", "definition", "etymology", "roots", "examples", "synonyms", "funFact"]
+};
+
+// --- FETCH FUNCTIONS ---
+
+export const fetchWordDetails = async (word: string): Promise<WordData> => {
+  const cleanWord = word.trim().toLowerCase();
   
-  // Calculate boundaries
-  const currentLevelBaseXP = 50 * Math.pow(level - 1, 2);
-  const nextLevelBaseXP = 50 * Math.pow(level, 2);
+  // 1. Check Cache
+  if (wordCache.has(cleanWord)) {
+    console.log(`⚡ Cache hit for: ${cleanWord}`);
+    return wordCache.get(cleanWord)!;
+  }
 
-  const titles = [
-    "Novice Seeker", "Word Watcher", "Curious Mind", "Bookworm", 
-    "Vocab Voyager", "Scroll Keeper", "Lexicon Legend", "Word Wizard", 
-    "Etymology Elder", "Grand Sage"
-  ];
+  // HYBRID MODE: Direct Client Call (Only works if VITE_GEMINI_API_KEY is in .env)
+  if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
+    console.log("⚠️ DEV MODE: Calling Gemini directly (Client-side)");
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-flash-lite-latest',
+        contents: `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details.`,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: WORD_SCHEMA,
+          systemInstruction: "You are an expert etymologist."
+        }
+      });
+      const data = JSON.parse(response.text!) as WordData;
+      wordCache.set(cleanWord, data); // Save to cache
+      return data;
+    } catch (e: any) {
+      console.error("Local Dev Error:", e);
+      if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
+        throw new Error("Daily AI usage limit reached. Please try again tomorrow!");
+      }
+      throw new Error(`Local Dev Error: ${e.message}`);
+    }
+  }
+
+  // SERVER MODE: Call /api/details
+  try {
+    const response = await fetch(`/api/details?word=${encodeURIComponent(word)}`);
+    
+    // Check quota before anything else
+    if (response.status === 429) {
+       throw new Error("Daily AI usage limit reached. Please try again tomorrow!");
+    }
+
+    // CRITICAL CHECK: Ensure we got JSON, not the HTML index page
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+       const text = await response.text();
+       if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
+          throw new Error("API Route Missing: Please check Vercel logs/deployment.");
+       }
+       throw new Error(`Server returned non-JSON response (${response.status})`);
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Server Error (${response.status})`);
+    }
+
+    const data = await response.json();
+    wordCache.set(cleanWord, data); // Save to cache
+    return data as WordData;
+  } catch (error: any) {
+    console.error("Error fetching word details:", error);
+    throw new Error(error.message || "Failed to fetch word details");
+  }
+};
+
+export const fetchWordImage = async (word: string, etymology: string): Promise<string | null> => {
+  const cleanWord = word.trim().toLowerCase();
+  if (imageCache.has(cleanWord)) return imageCache.get(cleanWord)!;
+
+  try {
+    // Construct Prompt for Pollinations
+    // Extract a brief context string from the etymology (first 100 chars clean)
+    const context = etymology.split('.')[0].substring(0, 100).replace(/[^a-zA-Z0-9 ]/g, ' ');
+    
+    // Style: "cute flat vector illustration... cartoon style, bright colors, educational illustration, clean background, modern infographic style"
+    const prompt = `cute flat vector illustration representing the meaning of the word "${word}", context: ${context}, cartoon style, bright colors, educational illustration, clean background, modern infographic style`;
+    
+    const encodedPrompt = encodeURIComponent(prompt);
+    // Pollinations URL (Free, no API key needed)
+    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=768&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Pollinations API Error");
+
+    const blob = await response.blob();
+    
+    // Convert Blob to Base64
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result && typeof reader.result === 'string') {
+          // Remove the "data:image/jpeg;base64," prefix as WordCard adds it
+          const base64 = reader.result.split(',')[1];
+          imageCache.set(cleanWord, base64);
+          resolve(base64);
+        } else {
+          resolve(null);
+        }
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+
+  } catch (e: any) {
+    console.warn("Image generation failed:", e);
+    return null;
+  }
+};
+
+export const fetchWordSummary = async (word: string): Promise<string> => {
+  const cleanWord = word.trim().toLowerCase();
   
-  const title = titles[Math.min(level - 1, titles.length - 1)];
+  if (summaryCache.has(cleanWord)) {
+    return summaryCache.get(cleanWord)!;
+  }
 
-  return {
-    level,
-    title,
-    minXP: currentLevelBaseXP,
-    nextLevelXP: nextLevelBaseXP
-  };
-};
+  if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-flash-lite-latest',
+        contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
+      });
+      const text = response.text || "No summary available.";
+      summaryCache.set(cleanWord, text);
+      return text;
+    } catch (e: any) { 
+        if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
+            return "Daily AI usage limit reached.";
+        }
+        return "Local Dev Summary Error"; 
+    }
+  }
 
-export const BADGES: Record<BadgeId, Badge> = {
-  first_search: {
-    id: 'first_search',
-    name: 'First Discovery',
-    description: 'Searched for your first word.',
-    icon: 'Search',
-    color: 'from-blue-400 to-blue-600',
-    statKey: 'wordsDiscovered',
-    threshold: 1
-  },
-  explorer_10: {
-    id: 'explorer_10',
-    name: 'Explorer',
-    description: 'Discovered 10 unique words.',
-    icon: 'Map',
-    color: 'from-emerald-400 to-teal-600',
-    statKey: 'wordsDiscovered',
-    threshold: 10
-  },
-  linguist_50: {
-    id: 'linguist_50',
-    name: 'Linguist',
-    description: 'A true lover of words. 50 discoveries.',
-    icon: 'BookOpen',
-    color: 'from-violet-400 to-purple-600',
-    statKey: 'wordsDiscovered',
-    threshold: 50
-  },
-  deep_diver: {
-    id: 'deep_diver',
-    name: 'Deep Diver',
-    description: 'Generated 5 AI deep dive summaries.',
-    icon: 'Anchor',
-    color: 'from-cyan-400 to-blue-500',
-    statKey: 'summariesGenerated',
-    threshold: 5
-  },
-  social_butterfly: {
-    id: 'social_butterfly',
-    name: 'Town Crier',
-    description: 'Shared knowledge with others 3 times.',
-    icon: 'Share2',
-    color: 'from-pink-400 to-rose-600',
-    statKey: 'shares',
-    threshold: 3
-  },
-  daily_streak_3: {
-    id: 'daily_streak_3',
-    name: 'Consistent',
-    description: 'Used the app for 3 days in a row.',
-    icon: 'Flame',
-    color: 'from-amber-400 to-orange-600',
-    statKey: 'currentStreak',
-    threshold: 3
+  try {
+    const response = await fetch(`/api/summary?word=${encodeURIComponent(word)}`);
+    if (response.status === 429) return "Daily AI usage limit reached. Please try again tomorrow.";
+    
+    if (!response.ok) throw new Error("Failed to fetch summary");
+    const data = await response.json();
+    const text = data.summary || "Could not generate summary.";
+    summaryCache.set(cleanWord, text);
+    return text;
+  } catch (error) {
+    return "Sorry, I couldn't generate a summary right now.";
   }
 };
 
-export const INITIAL_STATS: UserStats = {
-  xp: 0,
-  level: 1,
-  wordsDiscovered: 0,
-  summariesGenerated: 0,
-  shares: 0,
-  lastVisit: Date.now(),
-  currentStreak: 1,
-  badges: []
-};
-
-// --- API CLIENT ---
-
-export const fetchUserStats = async (user: TelegramUser): Promise<{ stats: UserStats, history: SearchHistoryItem[] }> => {
-  try {
-    // Pass name/photo so server can update user profile for leaderboard
-    const params = new URLSearchParams({
-      userId: user.id.toString(),
-      name: user.first_name,
-      photo: user.photo_url || ''
-    });
-
-    const response = await fetch(`/api/gamification?${params.toString()}`);
-    
-    if (!response.ok) throw new Error('Failed to fetch stats');
-    const result = await response.json();
-    
-    // Result contains { stats, history }
-    const serverStats = result.stats || INITIAL_STATS;
-    const serverHistory = result.history || [];
-
-    // Simple Cache for offline fallback
-    localStorage.setItem(`ety_stats_${user.id}`, JSON.stringify(serverStats));
-    // We don't necessarily overwrite local history entirely, merging happens in App usually,
-    // but for now let's assume server is source of truth for stats
-    
-    return { stats: serverStats, history: serverHistory };
-  } catch (error) {
-    console.warn("Gamification API unavailable:", error);
-    const localStats = localStorage.getItem(`ety_stats_${user.id}`);
-    const localHistory = localStorage.getItem('ety_history');
-    
-    return { 
-      stats: localStats ? JSON.parse(localStats) : INITIAL_STATS, 
-      history: localHistory ? JSON.parse(localHistory) : []
-    };
+export const fetchPronunciation = async (text: string): Promise<ArrayBuffer | null> => {
+  // Audio is heavy, we don't cache it in memory to avoid OOM, browser cache handles the fetch call usually if headers are set, 
+  // but since it's a POST/search query often, we just rely on browser or let it fetch.
+  // We can add a simple blob cache if needed, but text-to-speech is less likely to be repeated instantly than text data.
+  
+  if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-preview-tts',
+        contents: [{ parts: [{ text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } } },
+        },
+      });
+      const base64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      return base64 ? decodeAudio(base64) : null;
+    } catch (e) { return null; }
   }
-};
 
-export const trackAction = async (
-  userId: number, 
-  action: 'SEARCH' | 'SUMMARY' | 'SHARE',
-  payload?: { wordData?: WordData, word?: string, summary?: string }
-): Promise<{ stats: UserStats, newBadges: Badge[], history?: SearchHistoryItem[] }> => {
   try {
-    const response = await fetch('/api/gamification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, action, payload })
-    });
+    const response = await fetch(`/api/tts?text=${encodeURIComponent(text)}`);
+    if (response.status === 429) return null; 
     
-    if (!response.ok) throw new Error('Failed to update stats');
-    
-    const result = await response.json();
-    
-    // Update local cache
-    localStorage.setItem(`ety_stats_${userId}`, JSON.stringify(result.stats));
-    
-    const newBadgeObjects = result.newBadges.map((id: BadgeId) => BADGES[id]).filter(Boolean);
-    
-    return { stats: result.stats, newBadges: newBadgeObjects, history: result.history };
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data.audio) return decodeAudio(data.audio);
+    return null;
   } catch (error) {
-    console.error("Gamification update failed:", error);
-    const local = localStorage.getItem(`ety_stats_${userId}`);
-    return { stats: local ? JSON.parse(local) : INITIAL_STATS, newBadges: [] };
-  }
-};
-
-export const fetchLeaderboard = async (user: TelegramUser | null, stats: UserStats): Promise<LeaderboardEntry[]> => {
-  try {
-    const body: any = {
-      action: 'LEADERBOARD',
-      ...(user && {
-        userId: user.id,
-        name: user.first_name,
-        photo: user.photo_url || '',
-        stats: stats
-      })
-    };
-
-    const response = await fetch('/api/gamification', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-    if (!response.ok) throw new Error('Failed to fetch leaderboard');
-    return await response.json();
-  } catch (error) {
-    console.error(error);
-    return [];
+    return null;
   }
 };
