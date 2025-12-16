@@ -67,8 +67,8 @@ const checkBadges = (stats: any) => {
   return newBadges;
 };
 
-// Retry wrapper for optimistic concurrency control
-const executeWithRetry = async (operation: () => Promise<any>, retries = 3) => {
+// Retry wrapper for optimistic concurrency control with Backoff
+const executeWithRetry = async (operation: () => Promise<any>, retries = 5, initialDelay = 50) => {
   let lastError;
   for (let i = 0; i < retries; i++) {
     try {
@@ -77,6 +77,11 @@ const executeWithRetry = async (operation: () => Promise<any>, retries = 3) => {
       lastError = error;
       // Retry on VersionError (concurrency) or Duplicate Key (race condition on create)
       if (error.name === 'VersionError' || error.code === 11000) {
+        // Exponential backoff with jitter: 50ms, 100ms, 200ms... + random(0-50ms)
+        const jitter = Math.random() * 50;
+        const delay = (initialDelay * Math.pow(2, i)) + jitter;
+        // console.warn(`Concurrency error (attempt ${i + 1}/${retries}). Retrying in ${delay.toFixed(0)}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
       throw error;
@@ -144,9 +149,7 @@ export default async function handler(request: any, response: any) {
       if (!action) return response.status(400).json({ error: "Missing action" });
 
       // --- LEADERBOARD ACTION ---
-      // Leaderboard uses findOneAndUpdate which is atomic, so usually safe without retry loop for VersionError,
-      // but we wrap it for robustness against connection glitches or other transient issues if needed.
-      // However, simplified here as it's less prone to the specific VersionError seen.
+      // Leaderboard uses findOneAndUpdate which is atomic, so usually safe without retry loop for VersionError.
       if (action === 'LEADERBOARD') {
         if (userId) {
           const idStr = userId.toString();
@@ -154,7 +157,7 @@ export default async function handler(request: any, response: any) {
             { userId: idStr },
             { 
               $set: { 
-                 'profile.name': name || 'Explorer',
+                 'profile.name': name || 'Explorer', 
                  'profile.photo': photo || '' 
               },
               ...(syncedStats ? { 
@@ -197,7 +200,8 @@ export default async function handler(request: any, response: any) {
                stats: { ...INITIAL_STATS },
                searchHistory: []
              });
-             // We can save here immediately to establish the user, but we'll modify and save at the end.
+             // Initial save to creation conflicts are handled by retry
+             await user.save();
           }
 
           const stats = user.stats;
