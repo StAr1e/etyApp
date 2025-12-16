@@ -1,9 +1,10 @@
 import type { UserStats, LevelInfo, Badge, BadgeId, LeaderboardEntry, TelegramUser, SearchHistoryItem, WordData } from '../types';
 
-// --- SHARED DEFINITIONS (Used by UI for rendering) ---
+// --- LEVELING LOGIC ---
 
 export const getLevelInfo = (xp: number): LevelInfo => {
-  // Simple formula: Level = 1 + floor(sqrt(XP / 50))
+  // Formula: Level = 1 + floor(sqrt(XP / 50))
+  // To reach level 100, you need approx 490,000 XP.
   const level = 1 + Math.floor(Math.sqrt(xp / 50));
   
   // Calculate boundaries
@@ -13,10 +14,12 @@ export const getLevelInfo = (xp: number): LevelInfo => {
   const titles = [
     "Novice Seeker", "Word Watcher", "Curious Mind", "Bookworm", 
     "Vocab Voyager", "Scroll Keeper", "Lexicon Legend", "Word Wizard", 
-    "Etymology Elder", "Grand Sage"
+    "Etymology Elder", "Grand Sage", "Language Lord", "Keeper of Origins",
+    "Omniscient", "Time Traveler", "The First Speaker"
   ];
   
-  const title = titles[Math.min(level - 1, titles.length - 1)];
+  // Use the last title for levels beyond the list
+  const title = titles[Math.min(Math.floor((level - 1) / 5), titles.length - 1)];
 
   return {
     level,
@@ -26,61 +29,129 @@ export const getLevelInfo = (xp: number): LevelInfo => {
   };
 };
 
-export const BADGES: Record<BadgeId, Badge> = {
-  first_search: {
-    id: 'first_search',
-    name: 'First Discovery',
-    description: 'Searched for your first word.',
-    icon: 'Search',
-    color: 'from-blue-400 to-blue-600',
-    statKey: 'wordsDiscovered',
-    threshold: 1
-  },
-  explorer_10: {
-    id: 'explorer_10',
-    name: 'Explorer',
-    description: 'Discovered 10 unique words.',
-    icon: 'Map',
-    color: 'from-emerald-400 to-teal-600',
-    statKey: 'wordsDiscovered',
-    threshold: 10
-  },
-  linguist_50: {
-    id: 'linguist_50',
-    name: 'Linguist',
-    description: 'A true lover of words. 50 discoveries.',
-    icon: 'BookOpen',
-    color: 'from-violet-400 to-purple-600',
-    statKey: 'wordsDiscovered',
-    threshold: 50
-  },
-  deep_diver: {
-    id: 'deep_diver',
-    name: 'Deep Diver',
-    description: 'Generated 5 AI deep dive summaries.',
-    icon: 'Anchor',
-    color: 'from-cyan-400 to-blue-500',
-    statKey: 'summariesGenerated',
-    threshold: 5
-  },
-  social_butterfly: {
-    id: 'social_butterfly',
-    name: 'Town Crier',
-    description: 'Shared knowledge with others 3 times.',
-    icon: 'Share2',
-    color: 'from-pink-400 to-rose-600',
-    statKey: 'shares',
-    threshold: 3
-  },
-  daily_streak_3: {
-    id: 'daily_streak_3',
-    name: 'Consistent',
-    description: 'Used the app for 3 days in a row.',
-    icon: 'Flame',
-    color: 'from-amber-400 to-orange-600',
-    statKey: 'currentStreak',
-    threshold: 3
-  }
+// --- DYNAMIC BADGE GENERATION ---
+
+// Roman numerals for Tiers
+const toRoman = (num: number) => {
+  const roman = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII", "XIII", "XIV", "XV", "XVI", "XVII", "XVIII", "XIX", "XX"];
+  return roman[num] || num.toString();
+};
+
+const TIER_COLORS = [
+  'from-gray-400 to-gray-600',       // I
+  'from-emerald-400 to-teal-600',    // II
+  'from-blue-400 to-indigo-600',     // III
+  'from-violet-400 to-purple-600',   // IV
+  'from-fuchsia-400 to-pink-600',    // V
+  'from-rose-400 to-red-600',        // VI
+  'from-orange-400 to-amber-600',    // VII
+  'from-yellow-300 to-yellow-600',   // VIII (Gold)
+  'from-cyan-300 to-cyan-600',       // IX (Diamondish)
+  'from-slate-700 to-black',         // X (Black)
+];
+
+const getTierColor = (tier: number) => TIER_COLORS[(tier - 1) % TIER_COLORS.length];
+
+// Generate milestones dynamically
+// 1. SCHOLAR (Words)
+// 2. VISIONARY (Summaries)
+// 3. AMBASSADOR (Shares)
+// 4. DEVOTEE (Streak)
+
+export const generateAllBadges = (): Badge[] => {
+  const badges: Badge[] = [];
+
+  // 1. SCHOLAR (Words Discovered)
+  // 1, 10, 25, 50, 100, 250, 500, 1000...
+  const wordThresholds = [1, 10, 25, 50, 100, 200, 350, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 7500, 10000];
+  wordThresholds.forEach((thresh, i) => {
+    const tier = i + 1;
+    badges.push({
+      id: `scholar_${tier}`,
+      category: 'SCHOLAR',
+      tier,
+      name: `Scholar ${toRoman(tier)}`,
+      description: `Discover ${thresh} unique words.`,
+      icon: 'BookOpen',
+      color: getTierColor(tier),
+      statKey: 'wordsDiscovered',
+      threshold: thresh,
+      xpReward: 50 * tier // Increasing rewards
+    });
+  });
+
+  // 2. VISIONARY (Summaries)
+  // 1, 5, 10, 25, 50, 100...
+  const summaryThresholds = [1, 5, 10, 25, 50, 75, 100, 150, 200, 300, 400, 500, 750, 1000];
+  summaryThresholds.forEach((thresh, i) => {
+    const tier = i + 1;
+    badges.push({
+      id: `visionary_${tier}`,
+      category: 'VISIONARY',
+      tier,
+      name: `Visionary ${toRoman(tier)}`,
+      description: `Generate ${thresh} AI deep dives.`,
+      icon: 'Anchor',
+      color: getTierColor(tier),
+      statKey: 'summariesGenerated',
+      threshold: thresh,
+      xpReward: 75 * tier
+    });
+  });
+
+  // 3. AMBASSADOR (Shares)
+  // 1, 3, 5, 10, 20, 50...
+  const shareThresholds = [1, 3, 5, 10, 20, 35, 50, 75, 100, 150, 200, 300, 500];
+  shareThresholds.forEach((thresh, i) => {
+    const tier = i + 1;
+    badges.push({
+      id: `ambassador_${tier}`,
+      category: 'AMBASSADOR',
+      tier,
+      name: `Ambassador ${toRoman(tier)}`,
+      description: `Share word cards ${thresh} times.`,
+      icon: 'Share2',
+      color: getTierColor(tier),
+      statKey: 'shares',
+      threshold: thresh,
+      xpReward: 100 * tier
+    });
+  });
+
+  // 4. DEVOTEE (Streak)
+  // 3, 7, 14, 30, 60, 90, 180, 365...
+  const streakThresholds = [3, 7, 14, 21, 30, 45, 60, 90, 120, 180, 250, 365];
+  streakThresholds.forEach((thresh, i) => {
+    const tier = i + 1;
+    badges.push({
+      id: `devotee_${tier}`,
+      category: 'DEVOTEE',
+      tier,
+      name: `Devotee ${toRoman(tier)}`,
+      description: `Maintain a ${thresh}-day visit streak.`,
+      icon: 'Flame',
+      color: getTierColor(tier),
+      statKey: 'currentStreak',
+      threshold: thresh,
+      xpReward: 150 * tier
+    });
+  });
+
+  return badges;
+};
+
+// Create a lookup map for fast access
+const ALL_BADGES = generateAllBadges();
+export const BADGE_MAP = ALL_BADGES.reduce((acc, b) => {
+  acc[b.id] = b;
+  return acc;
+}, {} as Record<BadgeId, Badge>);
+
+// Helper: Get user's current progress for a specific category (e.g., What is next Scholar badge?)
+export const getNextBadgeForCategory = (category: string, earnedBadgeIds: BadgeId[]): Badge | null => {
+  const categoryBadges = ALL_BADGES.filter(b => b.category === category);
+  // Find the first one NOT in earnedBadgeIds
+  return categoryBadges.find(b => !earnedBadgeIds.includes(b.id)) || null;
 };
 
 export const INITIAL_STATS: UserStats = {
@@ -98,7 +169,6 @@ export const INITIAL_STATS: UserStats = {
 
 export const fetchUserStats = async (user: TelegramUser): Promise<{ stats: UserStats, history: SearchHistoryItem[] }> => {
   try {
-    // Pass name/photo so server can update user profile for leaderboard
     const params = new URLSearchParams({
       userId: user.id.toString(),
       name: user.first_name,
@@ -110,14 +180,10 @@ export const fetchUserStats = async (user: TelegramUser): Promise<{ stats: UserS
     if (!response.ok) throw new Error('Failed to fetch stats');
     const result = await response.json();
     
-    // Result contains { stats, history }
     const serverStats = result.stats || INITIAL_STATS;
     const serverHistory = result.history || [];
 
-    // Simple Cache for offline fallback
     localStorage.setItem(`ety_stats_${user.id}`, JSON.stringify(serverStats));
-    // We don't necessarily overwrite local history entirely, merging happens in App usually,
-    // but for now let's assume server is source of truth for stats
     
     return { stats: serverStats, history: serverHistory };
   } catch (error) {
@@ -135,7 +201,7 @@ export const fetchUserStats = async (user: TelegramUser): Promise<{ stats: UserS
 export const trackAction = async (
   userId: number, 
   action: 'SEARCH' | 'SUMMARY' | 'SHARE',
-  payload?: { wordData?: WordData, word?: string, summary?: string }
+  payload?: { wordData?: WordData, word?: string, summary?: string, image?: string }
 ): Promise<{ stats: UserStats, newBadges: Badge[], history?: SearchHistoryItem[] }> => {
   try {
     const response = await fetch('/api/gamification', {
@@ -148,10 +214,10 @@ export const trackAction = async (
     
     const result = await response.json();
     
-    // Update local cache
     localStorage.setItem(`ety_stats_${userId}`, JSON.stringify(result.stats));
     
-    const newBadgeObjects = result.newBadges.map((id: BadgeId) => BADGES[id]).filter(Boolean);
+    // Map string IDs back to full Badge objects
+    const newBadgeObjects = result.newBadges.map((id: BadgeId) => BADGE_MAP[id]).filter(Boolean);
     
     return { stats: result.stats, newBadges: newBadgeObjects, history: result.history };
   } catch (error) {

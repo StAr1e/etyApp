@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { UserStats, LevelInfo, Badge, TelegramWebApp } from '../types';
-import { BADGES, getLevelInfo } from '../services/gamification';
-import { X, Trophy, Share2, Crown, Zap, Shield, Flame, BookOpen, Map, Anchor, Search, Lock } from 'lucide-react';
+import { UserStats, Badge, TelegramWebApp } from '../types';
+import { getLevelInfo, BADGE_MAP, getNextBadgeForCategory } from '../services/gamification';
+import { X, Trophy, Share2, Crown, Zap, Shield, Flame, BookOpen, Anchor, Lock, ArrowRight } from 'lucide-react';
 
 interface ProfileModalProps {
   stats: UserStats;
@@ -10,8 +10,16 @@ interface ProfileModalProps {
 }
 
 const IconMap: Record<string, React.FC<any>> = {
-  Search, Map, BookOpen, Anchor, Share2, Flame, Trophy, Crown, Zap, Shield
+  BookOpen, Anchor, Share2, Flame
 };
+
+// Order of display
+const CATEGORIES = [
+  { key: 'SCHOLAR', label: 'Discoveries' },
+  { key: 'VISIONARY', label: 'Deep Dives' },
+  { key: 'AMBASSADOR', label: 'Shares' },
+  { key: 'DEVOTEE', label: 'Streak' }
+];
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onShowLeaderboard }) => {
   const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
@@ -25,7 +33,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
       tg.HapticFeedback.impactOccurred('heavy');
       
       const badgeCount = stats.badges.length;
-      const text = `🏆 I am a Level ${stats.level} ${levelInfo.title} on Ety.ai!\n\n✨ ${stats.wordsDiscovered} Words Discovered\n🔥 ${stats.currentStreak} Day Streak\n🎖 ${badgeCount} Badges Earned`;
+      const text = `🏆 I am a Level ${stats.level} ${levelInfo.title} on Ety.ai!\n\n✨ ${stats.wordsDiscovered} Words Discovered\n🔥 ${stats.currentStreak} Day Streak\n🎖 ${badgeCount} Achievements`;
       
       try {
         tg.switchInlineQuery(text, ['users', 'groups', 'channels']);
@@ -45,7 +53,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
           <div className="relative overflow-hidden bg-gradient-to-br from-[#1c1c1e] to-[#2c2c2e] dark:from-[#000] dark:to-[#1a1a1a] text-white p-8 pt-12 pb-16 rounded-b-[3rem] shadow-lg shrink-0">
              {/* Dynamic Background */}
              <div className="absolute top-[-50%] left-[-50%] w-[200%] h-[200%] bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-500/20 via-transparent to-transparent animate-spin-slow pointer-events-none"></div>
-             <div className="absolute top-0 right-0 w-64 h-64 bg-purple-500/20 rounded-full blur-[80px] -mr-16 -mt-16 pointer-events-none"></div>
              
              {/* Close Button */}
              <button 
@@ -82,11 +89,11 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
           {/* --- CONTENT BODY --- */}
           <div className="px-6 -mt-10 relative z-20 flex-1 pb-8 space-y-6">
              
-             {/* XP Progress Card */}
+             {/* XP Progress */}
              <div className="bg-tg-bg/80 backdrop-blur-xl rounded-3xl p-5 shadow-xl border border-tg-hint/10">
                 <div className="flex justify-between items-end mb-3">
                    <div className="text-xs font-bold text-tg-hint uppercase tracking-wider">Progress to Lvl {stats.level + 1}</div>
-                   <div className="text-xs font-bold text-tg-button">{Math.floor(levelInfo.nextLevelXP - stats.xp)} XP Left</div>
+                   <div className="text-xs font-bold text-tg-button">{Math.floor(levelInfo.nextLevelXP - stats.xp).toLocaleString()} XP Left</div>
                 </div>
                 <div className="h-5 bg-tg-secondaryBg rounded-full overflow-hidden border border-tg-hint/5 relative shadow-inner">
                    <div 
@@ -98,14 +105,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                 </div>
              </div>
 
-             {/* Stats Grid */}
-             <div className="grid grid-cols-3 gap-3">
-                <StatTile icon={BookOpen} value={stats.wordsDiscovered} label="Words" color="text-blue-500" bg="bg-blue-500/10" />
-                <StatTile icon={Flame} value={stats.currentStreak} label="Streak" color="text-orange-500" bg="bg-orange-500/10" />
-                <StatTile icon={Share2} value={stats.shares} label="Shares" color="text-pink-500" bg="bg-pink-500/10" />
-             </div>
-
-             {/* Badges Section */}
+             {/* Dynamic Achievements List */}
              <div>
                 <div className="flex items-center justify-between mb-4 px-1">
                    <h3 className="font-bold text-tg-text flex items-center gap-2 text-lg">
@@ -113,61 +113,92 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                      Achievements
                    </h3>
                    <span className="text-xs font-bold bg-tg-secondaryBg text-tg-hint px-2 py-1 rounded-lg">
-                     {stats.badges.length} / {Object.keys(BADGES).length}
+                     {stats.badges.length}
                    </span>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-3">
-                   {Object.values(BADGES).map((badge) => {
-                      const isUnlocked = stats.badges.includes(badge.id);
-                      const Icon = IconMap[badge.icon] || Shield;
-                      
-                      // Calculate progress if locked
-                      const currentVal = (badge.statKey ? stats[badge.statKey] : 0) as number;
-                      const threshold = badge.threshold || 1;
-                      const currentProgress = Math.min(currentVal, threshold);
-                      const percentage = Math.round((currentProgress / threshold) * 100);
+                <div className="space-y-4">
+                   {CATEGORIES.map(cat => {
+                     // 1. Get Highest Unlocked Badge for this Category
+                     const unlockedInCat = stats.badges
+                        .map(id => BADGE_MAP[id])
+                        .filter(b => b && b.category === cat.key)
+                        .sort((a, b) => b.tier - a.tier); // Descending
 
-                      return (
-                        <button 
-                          key={badge.id}
-                          onClick={() => setSelectedBadge(badge)}
-                          className={`text-left w-full relative group overflow-hidden p-4 rounded-2xl border transition-all duration-300 active:scale-95 ${
-                            isUnlocked 
-                              ? 'bg-gradient-to-br from-tg-bg to-tg-secondaryBg border-tg-hint/10 shadow-sm' 
-                              : 'bg-tg-secondaryBg/50 border-transparent opacity-60 grayscale'
-                          }`}
-                        >
+                     const currentBadge = unlockedInCat[0];
+                     
+                     // 2. Get Next Locked Badge
+                     const nextBadge = getNextBadgeForCategory(cat.key, stats.badges);
+
+                     // Decide what to show: The highest unlocked badge OR the next locked one
+                     // If no unlocked, show next locked (Tier 1). If all unlocked (rare), show highest.
+                     const displayBadge = nextBadge || currentBadge;
+                     const isUnlocked = currentBadge && displayBadge && currentBadge.id === displayBadge.id;
+                     
+                     if (!displayBadge) return null;
+
+                     const Icon = IconMap[displayBadge.icon] || Shield;
+                     const currentVal = (displayBadge.statKey ? stats[displayBadge.statKey] : 0) as number;
+                     const threshold = displayBadge.threshold || 1;
+                     const percentage = Math.min(100, Math.round((currentVal / threshold) * 100));
+
+                     return (
+                        <div key={cat.key}>
+                           <div className="text-[10px] font-bold text-tg-hint uppercase tracking-wider mb-2 ml-1">{cat.label}</div>
+                           
+                           {/* Render Current Highest Badge if exists */}
                            {isUnlocked && (
-                             <div className={`absolute top-0 right-0 w-16 h-16 bg-gradient-to-br ${badge.color} opacity-10 rounded-full blur-xl -mr-6 -mt-6`}></div>
+                             <button 
+                               onClick={() => setSelectedBadge(currentBadge)}
+                               className="w-full relative group overflow-hidden p-4 rounded-2xl border transition-all duration-300 bg-gradient-to-br from-tg-bg to-tg-secondaryBg border-tg-hint/10 shadow-sm flex items-center gap-4 mb-2"
+                             >
+                                <div className={`absolute top-0 right-0 w-16 h-16 bg-gradient-to-br ${currentBadge.color} opacity-10 rounded-full blur-xl -mr-6 -mt-6`}></div>
+                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm bg-gradient-to-br ${currentBadge.color} text-white`}>
+                                   <Icon size={20} />
+                                </div>
+                                <div className="text-left flex-1">
+                                   <div className="font-bold text-tg-text">{currentBadge.name}</div>
+                                   <div className="text-xs text-tg-hint">{currentBadge.description}</div>
+                                </div>
+                                <ArrowRight size={16} className="text-tg-hint/30" />
+                             </button>
+                           )}
+
+                           {/* Render Next Target (Locked) */}
+                           {!isUnlocked && nextBadge && (
+                             <button 
+                               onClick={() => setSelectedBadge(nextBadge)}
+                               className="w-full p-4 rounded-2xl border border-dashed border-tg-hint/20 bg-tg-secondaryBg/30 flex items-center gap-4 relative overflow-hidden active:scale-95 transition-transform text-left"
+                             >
+                                <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 bg-tg-secondaryBg text-tg-hint">
+                                   <Lock size={18} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                   <div className="flex justify-between items-center mb-1">
+                                      <div className="font-bold text-tg-text/70 text-sm">Next: {nextBadge.name}</div>
+                                      <div className="text-[10px] font-mono font-bold text-tg-hint">{currentVal}/{threshold}</div>
+                                   </div>
+                                   <div className="h-2 bg-tg-hint/10 rounded-full overflow-hidden">
+                                      <div className="h-full bg-tg-button/50" style={{ width: `${percentage}%` }}></div>
+                                   </div>
+                                   <div className="text-[10px] text-tg-button mt-1 font-medium">
+                                     +{nextBadge.xpReward} XP Reward
+                                   </div>
+                                </div>
+                             </button>
                            )}
                            
-                           <div className="flex items-start gap-3">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${
-                                isUnlocked 
-                                  ? `bg-gradient-to-br ${badge.color} text-white` 
-                                  : 'bg-tg-hint/20 text-tg-hint'
-                              }`}>
-                                 {isUnlocked ? <Icon size={18} /> : <Lock size={16} />}
+                           {/* If we have unlocked one, but there is a next one, show a small "Next Target" preview below */}
+                           {isUnlocked && nextBadge && (
+                              <div className="pl-16 pr-2">
+                                <div className="flex items-center gap-2 text-xs text-tg-hint">
+                                   <span className="w-1.5 h-1.5 rounded-full bg-tg-hint/30"></span>
+                                   <span>Next: <strong>{nextBadge.name}</strong> at {nextBadge.threshold} (+{nextBadge.xpReward} XP)</span>
+                                </div>
                               </div>
-                              <div className="min-w-0 flex-1">
-                                 <div className="font-bold text-sm text-tg-text truncate leading-tight mb-1">{badge.name}</div>
-                                 <div className="text-xs text-tg-hint/80 leading-snug line-clamp-2">
-                                   {badge.description}
-                                 </div>
-                                 {/* Progress Bar for Locked Items */}
-                                 {!isUnlocked && badge.threshold && (
-                                    <div className="mt-2 flex items-center gap-2">
-                                       <div className="flex-1 h-1.5 bg-tg-hint/10 rounded-full overflow-hidden">
-                                          <div className="h-full bg-tg-hint/50" style={{ width: `${percentage}%` }}></div>
-                                       </div>
-                                       <span className="text-[9px] font-mono font-bold text-tg-hint">{currentProgress}/{threshold}</span>
-                                    </div>
-                                 )}
-                              </div>
-                           </div>
-                        </button>
-                      );
+                           )}
+                        </div>
+                     );
                    })}
                 </div>
              </div>
@@ -243,6 +274,12 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
                                  {selectedBadge.description}
                              </p>
                            </div>
+                           
+                           {/* XP Reward Note */}
+                           <div className="mt-4 flex items-center justify-center gap-1 text-xs font-bold text-tg-button">
+                              <Zap size={12} fill="currentColor" />
+                              <span>{selectedBadge.xpReward} XP Reward</span>
+                           </div>
                        </div>
                    </div>
                </div>
@@ -252,13 +289,3 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({ stats, onClose, onSh
     </div>
   );
 };
-
-const StatTile = ({ icon: Icon, value, label, color, bg }: any) => (
-  <div className="bg-tg-bg rounded-2xl p-3 border border-tg-hint/10 shadow-sm flex flex-col items-center justify-center gap-1 group hover:border-tg-hint/20 transition-colors">
-     <div className={`p-2 rounded-full ${bg} ${color} mb-1 group-hover:scale-110 transition-transform`}>
-        <Icon size={18} />
-     </div>
-     <div className="font-black text-xl text-tg-text">{value}</div>
-     <div className="text-[10px] uppercase font-bold text-tg-hint/80 tracking-wide">{label}</div>
-  </div>
-);

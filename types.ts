@@ -28,17 +28,22 @@ export interface SearchHistoryItem {
 
 // --- Gamification Types ---
 
-export type BadgeId = 'first_search' | 'explorer_10' | 'linguist_50' | 'deep_diver' | 'social_butterfly' | 'daily_streak_3';
+// Badges are now dynamic strings like "scholar_1", "scholar_2", etc.
+export type BadgeId = string; 
+
+export type BadgeCategory = 'SCHOLAR' | 'VISIONARY' | 'AMBASSADOR' | 'DEVOTEE';
 
 export interface Badge {
   id: BadgeId;
+  category: BadgeCategory;
+  tier: number;
   name: string;
   description: string;
-  icon: string;
-  color: string;
-  statKey?: keyof UserStats;
-  threshold?: number;
-  unlockedAt?: number;
+  icon: string; // Icon name
+  color: string; // Tailwind gradient classes
+  statKey: keyof UserStats;
+  threshold: number;
+  xpReward: number;
 }
 
 export interface UserStats {

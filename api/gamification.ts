@@ -19,6 +19,15 @@ const INITIAL_STATS = {
   badges: []
 };
 
+// --- DYNAMIC THRESHOLD CONFIG (Must match Client) ---
+// We duplicate this here to avoid complex build steps sharing code between API (Node) and UI (React)
+const THRESHOLDS = {
+  SCHOLAR: [1, 10, 25, 50, 100, 200, 350, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 7500, 10000],
+  VISIONARY: [1, 5, 10, 25, 50, 75, 100, 150, 200, 300, 400, 500, 750, 1000],
+  AMBASSADOR: [1, 3, 5, 10, 20, 35, 50, 75, 100, 150, 200, 300, 500],
+  DEVOTEE: [3, 7, 14, 21, 30, 45, 60, 90, 120, 180, 250, 365]
+};
+
 // Helper to calculate streak
 const updateStreak = (stats: any) => {
   const last = new Date(stats.lastVisit);
@@ -33,7 +42,7 @@ const updateStreak = (stats: any) => {
     const diffTime = Math.abs(now.getTime() - last.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
     
-    // Check if consecutive day (1 day difference roughly, allowing for 48h window logic)
+    // Check if consecutive day
     if (diffDays <= 2) {
       stats.currentStreak = (stats.currentStreak || 0) + 1;
       stats.xp = (stats.xp || 0) + XP_ACTIONS.DAILY_VISIT;
@@ -46,28 +55,43 @@ const updateStreak = (stats: any) => {
   return xpGained;
 };
 
-// Helper to check badges
+// Helper to check badges dynamically based on tiers
 const checkBadges = (stats: any) => {
   const newBadges: string[] = [];
+  let bonusXP = 0;
   
-  const addBadge = (id: string, condition: boolean) => {
-    if (condition && !stats.badges.includes(id)) {
+  const addBadge = (id: string, tier: number, baseReward: number) => {
+    if (!stats.badges.includes(id)) {
       stats.badges.push(id);
       newBadges.push(id);
+      bonusXP += (baseReward * tier); // Award bonus XP!
     }
   };
 
-  addBadge('first_search', stats.wordsDiscovered >= 1);
-  addBadge('explorer_10', stats.wordsDiscovered >= 10);
-  addBadge('linguist_50', stats.wordsDiscovered >= 50);
-  addBadge('deep_diver', stats.summariesGenerated >= 5);
-  addBadge('social_butterfly', stats.shares >= 3);
-  addBadge('daily_streak_3', stats.currentStreak >= 3);
+  // 1. SCHOLAR (Words)
+  THRESHOLDS.SCHOLAR.forEach((thresh, i) => {
+    if (stats.wordsDiscovered >= thresh) addBadge(`scholar_${i+1}`, i+1, 50);
+  });
 
-  return newBadges;
+  // 2. VISIONARY (Summaries)
+  THRESHOLDS.VISIONARY.forEach((thresh, i) => {
+    if (stats.summariesGenerated >= thresh) addBadge(`visionary_${i+1}`, i+1, 75);
+  });
+
+  // 3. AMBASSADOR (Shares)
+  THRESHOLDS.AMBASSADOR.forEach((thresh, i) => {
+    if (stats.shares >= thresh) addBadge(`ambassador_${i+1}`, i+1, 100);
+  });
+
+  // 4. DEVOTEE (Streak)
+  THRESHOLDS.DEVOTEE.forEach((thresh, i) => {
+    if (stats.currentStreak >= thresh) addBadge(`devotee_${i+1}`, i+1, 150);
+  });
+
+  return { newBadges, bonusXP };
 };
 
-// Retry wrapper for optimistic concurrency control with Backoff
+// Retry wrapper
 const executeWithRetry = async (operation: () => Promise<any>, retries = 5, initialDelay = 50) => {
   let lastError;
   for (let i = 0; i < retries; i++) {
@@ -75,15 +99,12 @@ const executeWithRetry = async (operation: () => Promise<any>, retries = 5, init
       return await operation();
     } catch (error: any) {
       lastError = error;
-      // Retry on VersionError (concurrency) or Duplicate Key (race condition on create)
       if (error.name === 'VersionError' || error.code === 11000) {
-        // Exponential backoff with jitter: 50ms, 100ms, 200ms... + random jitter
         const jitter = Math.random() * 50;
         const delay = (initialDelay * Math.pow(2, i)) + jitter;
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
-      // If it's not a concurrency error, throw immediately
       throw error;
     }
   }
@@ -107,7 +128,6 @@ export default async function handler(request: any, response: any) {
 
       try {
         const data = await executeWithRetry(async () => {
-          // Find or Create
           let user = await User.findOne({ userId: idStr });
           
           if (!user) {
@@ -118,14 +138,19 @@ export default async function handler(request: any, response: any) {
               searchHistory: []
             });
           } else {
-            // Update profile info if changed
             if (name) user.profile.name = name;
             if (photo) user.profile.photo = photo;
           }
 
-          // Check Streak
           const streakXp = updateStreak(user.stats);
-          if (streakXp > 0 || name || photo) {
+          
+          // Check for any missing badges from past activities (migration/catch-up)
+          const { newBadges, bonusXP } = checkBadges(user.stats);
+          
+          if (streakXp > 0 || bonusXP > 0 || newBadges.length > 0 || name || photo) {
+            user.stats.xp += bonusXP;
+            // Update Level
+            user.stats.level = 1 + Math.floor(Math.sqrt(user.stats.xp / 50));
             user.markModified('stats'); 
             await user.save();
           }
@@ -148,8 +173,6 @@ export default async function handler(request: any, response: any) {
       const { userId, action, name, photo, stats: syncedStats, payload } = request.body;
       if (!action) return response.status(400).json({ error: "Missing action" });
 
-      // --- LEADERBOARD ACTION ---
-      // Leaderboard uses findOneAndUpdate which is atomic.
       if (action === 'LEADERBOARD') {
         if (userId) {
           const idStr = userId.toString();
@@ -186,7 +209,6 @@ export default async function handler(request: any, response: any) {
         return response.status(200).json(leaderboard);
       }
 
-      // --- STANDARD GAMIFICATION ACTIONS ---
       if (!userId) return response.status(400).json({ error: "userId required" });
       const idStr = userId.toString();
 
@@ -200,7 +222,6 @@ export default async function handler(request: any, response: any) {
                stats: { ...INITIAL_STATS },
                searchHistory: []
              });
-             // Force save to create
              await user.save();
           }
 
@@ -208,21 +229,17 @@ export default async function handler(request: any, response: any) {
           const previousLevel = stats.level;
 
           // Apply Action XP
-          const xpGain = XP_ACTIONS[action] || 0;
-          stats.xp += xpGain;
+          if (action !== 'IMAGE') {
+             stats.xp += (XP_ACTIONS[action] || 0);
+          }
 
           if (action === 'SEARCH') {
             stats.wordsDiscovered++;
-            // Save Search History
             if (payload && payload.wordData) {
                if (!user.searchHistory) user.searchHistory = [];
-               
-               // Remove duplicates
                const existing = user.searchHistory.filter(item => 
                  item.word.toLowerCase() !== payload.wordData.word.toLowerCase()
                );
-               
-               // Add new to top
                user.searchHistory = [{
                  word: payload.wordData.word,
                  timestamp: Date.now(),
@@ -230,8 +247,6 @@ export default async function handler(request: any, response: any) {
                  summary: payload.summary || '',
                  image: '' 
                }, ...existing];
-               
-               // Limit to 50
                if (user.searchHistory.length > 50) {
                  user.searchHistory = user.searchHistory.slice(0, 50);
                }
@@ -249,28 +264,27 @@ export default async function handler(request: any, response: any) {
             }
           }
 
-          if (action === 'IMAGE') {
-              if (payload && payload.word && payload.image) {
-                  if (!user.searchHistory) user.searchHistory = [];
-                  const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
-                  if (idx !== -1) {
-                      user.searchHistory[idx].image = payload.image;
-                  }
+          if (action === 'IMAGE' && payload && payload.word && payload.image) {
+              if (!user.searchHistory) user.searchHistory = [];
+              const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
+              if (idx !== -1) {
+                  user.searchHistory[idx].image = payload.image;
               }
           }
 
           if (action === 'SHARE') stats.shares++;
 
+          // Check Badges & Add Bonus XP
+          const { newBadges, bonusXP } = checkBadges(stats);
+          stats.xp += bonusXP;
+
           // Recalculate Level
           stats.level = 1 + Math.floor(Math.sqrt(stats.xp / 50));
-
-          // Check Badges
-          const newBadges = checkBadges(stats);
           
           stats.lastVisit = Date.now();
           
           user.markModified('stats');
-          user.markModified('searchHistory'); // Critical for nested array changes
+          user.markModified('searchHistory');
           
           await user.save();
 
