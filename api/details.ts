@@ -4,6 +4,30 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 const cache = new Map<string, { data: any, timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+// Helper to retry generation on 503/Overloaded errors
+const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await ai.models.generateContent(params);
+        } catch (e: any) {
+            const msg = (e.message || "").toLowerCase();
+            // Check for 503 Service Unavailable or Overloaded
+            // Sometimes the error message is a JSON string containing code 503
+            const isOverloaded = msg.includes('503') || msg.includes('overloaded') || msg.includes('unavailable');
+            
+            if (isOverloaded && i < retries - 1) {
+                // Exponential backoff: 1s, 2s, 4s...
+                const delay = 1000 * Math.pow(2, i);
+                console.log(`AI Overloaded (Attempt ${i+1}/${retries}). Retrying in ${delay}ms...`);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            throw e;
+        }
+    }
+    throw new Error("Model overloaded after retries"); // Should be caught by caller
+}
+
 export default async function handler(request: any, response: any) {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -59,7 +83,8 @@ export default async function handler(request: any, response: any) {
 
     const prompt = `Analyze "${word}" for etymology app. Precise, concise details.`;
 
-    const result = await ai.models.generateContent({
+    // Use retry wrapper
+    const result: any = await generateWithRetry(ai, {
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
@@ -100,13 +125,31 @@ export default async function handler(request: any, response: any) {
   } catch (error: any) {
     console.error("Critical API Error:", error);
 
-    const msg = error.message?.toLowerCase() || "";
+    // UNWRAP ERROR: Sometimes the error message is a JSON string from the SDK
+    let readableMessage = error.message || "Internal Server Error";
+    if (typeof readableMessage === 'string' && readableMessage.trim().startsWith('{')) {
+        try {
+            const parsed = JSON.parse(readableMessage);
+            if (parsed.error && parsed.error.message) {
+                readableMessage = parsed.error.message;
+            }
+        } catch(e) {}
+    }
+
+    const msg = readableMessage.toLowerCase();
+
+    // HANDLE QUOTA (429)
     if (error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
        return response.status(429).json({ error: "Daily AI usage limit reached. Please try again tomorrow!" });
     }
 
+    // HANDLE OVERLOAD (503)
+    if (error.status === 503 || msg.includes('503') || msg.includes('overloaded') || msg.includes('unavailable')) {
+        return response.status(503).json({ error: "The AI model is currently overloaded. Please try again in a moment." });
+    }
+
     return response.status(500).json({ 
-        error: error.message || "Internal Server Error",
+        error: readableMessage,
         timestamp: new Date().toISOString()
     });
   }

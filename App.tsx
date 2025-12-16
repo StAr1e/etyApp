@@ -7,7 +7,7 @@ import { HistoryModal } from './components/HistoryModal'; // Import new modal
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock, Send } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock, Send, ServerCrash } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -362,7 +362,11 @@ export default function App() {
     };
   }, [view, showSummaryModal, showProfile, showLeaderboard, showHistoryModal, handleGenerateSummary, handleBack]);
 
-  const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
+  const errorLower = error?.toLowerCase() || "";
+  const isQuotaError = errorLower.includes("limit") || errorLower.includes("quota") || errorLower.includes("429");
+  // 503 Overloaded is NOT a quota error, it's a server busy error. We handle it distinctly.
+  const isOverloaded = errorLower.includes("overloaded") || errorLower.includes("busy") || errorLower.includes("unavailable");
+
   const levelInfo = getLevelInfo(userStats.xp);
   const nextLevelProgress = ((userStats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100;
 
@@ -518,15 +522,24 @@ export default function App() {
             <div className={`mt-6 mx-auto max-w-md p-5 rounded-2xl flex items-start gap-4 shadow-sm border animate-in slide-in-from-bottom-2 ${
                 isQuotaError 
                  ? "bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-100 border-amber-200 dark:border-amber-800/30" 
+                 : isOverloaded
+                 ? "bg-blue-50 dark:bg-blue-900/10 text-blue-800 dark:text-blue-100 border-blue-200 dark:border-blue-800/30"
                  : "bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-200 border-red-200 dark:border-red-800/30"
             }`}>
-              <div className={`p-2 rounded-full shrink-0 ${isQuotaError ? 'bg-amber-100 dark:bg-amber-800' : 'bg-red-100 dark:bg-red-800'}`}>
-                {isQuotaError ? <CloudOff size={20} /> : <AlertTriangle size={20} />}
+              <div className={`p-2 rounded-full shrink-0 ${
+                  isQuotaError ? 'bg-amber-100 dark:bg-amber-800' : isOverloaded ? 'bg-blue-100 dark:bg-blue-800' : 'bg-red-100 dark:bg-red-800'
+              }`}>
+                {isQuotaError ? <CloudOff size={20} /> : isOverloaded ? <ServerCrash size={20} /> : <AlertTriangle size={20} />}
               </div>
               <div>
-                 <p className="font-bold text-base mb-1">{isQuotaError ? "Daily Limit Reached" : "Connection Error"}</p>
-                 <p className="text-sm opacity-90 leading-relaxed">{error}</p>
-                 {!isQuotaError && error.includes("API Key missing") && (
+                 <p className="font-bold text-base mb-1">
+                    {isQuotaError ? "Daily Limit Reached" : isOverloaded ? "Server Busy" : "Connection Error"}
+                 </p>
+                 <p className="text-sm opacity-90 leading-relaxed">
+                    {isQuotaError ? "You've reached your daily AI limit. Please try again tomorrow!" : isOverloaded ? "The AI is thinking hard. Please try again in a few moments." : error}
+                 </p>
+                 {/* Env Hint for Devs */}
+                 {!isQuotaError && !isOverloaded && error.includes("API Key missing") && (
                    <p className="text-xs mt-3 font-mono bg-black/5 dark:bg-white/5 p-2 rounded border border-black/5">
                      ENV: GEMINI_API_KEY missing
                    </p>
