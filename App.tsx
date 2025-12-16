@@ -34,13 +34,13 @@ export default function App() {
   // --- Handlers ---
 
   const handleGamificationAction = async (
-      action: 'SEARCH' | 'SUMMARY' | 'SHARE', 
-      payload?: { wordData?: WordData, word?: string, summary?: string }
+      action: 'SEARCH' | 'SUMMARY' | 'SHARE' | 'IMAGE', 
+      payload?: { wordData?: WordData, word?: string, summary?: string, image?: string }
     ) => {
     if (!user) return; // Cannot track if no user ID
 
     // Send payload (word data) to server to persist history
-    const { stats, newBadges, history: serverHistory } = await trackAction(user.id, action, payload);
+    const { stats, newBadges, history: serverHistory } = await trackAction(user.id, action as any, payload);
     
     // Check for level up
     if (stats.level > userStats.level) {
@@ -145,6 +145,30 @@ export default function App() {
     }
   }, [wordData, user, history]); 
 
+  // Callback from WordCard when image is successfully generated
+  const handleImageLoaded = useCallback((base64Image: string) => {
+    if (!wordData) return;
+
+    // Save to DB
+    if(user) {
+        handleGamificationAction('IMAGE', {
+            word: wordData.word,
+            image: base64Image
+        });
+    }
+
+    // Local Update
+    const updatedHistory = history.map(item => {
+        if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
+           return { ...item, image: base64Image };
+        }
+        return item;
+    });
+    setHistory(updatedHistory);
+    localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
+
+  }, [wordData, user, history]);
+
   const handleSearch = async (term: string) => {
     if (!term) return;
     setIsLoading(true);
@@ -162,6 +186,8 @@ export default function App() {
       if (localCached && localCached.data) {
           console.log("Loading from Local History Cache");
           data = localCached.data;
+          // Set summary from history if available
+          if(localCached.summary) setSummary(localCached.summary);
       } else {
           // 2. Fetch from API
           data = await fetchWordDetails(term);
@@ -172,6 +198,7 @@ export default function App() {
 
       if(user) {
          // This will save the full data to DB, so next time it is fetched from DB history
+         // Note: If it was cached, calling this again just moves it to top of history stack on backend
          handleGamificationAction('SEARCH', { wordData: data }); 
       } else {
          // Local-only fallback update
@@ -206,6 +233,10 @@ export default function App() {
        setSummary(item.summary || null);
        setView('result');
        setShowHistoryModal(false);
+       
+       // Optionally move to top of history locally/remotely?
+       // For now, let's treat "restore" as just viewing. 
+       // If we want to bump timestamp, we'd call handleSearch(item.word)
      } else {
        setShowHistoryModal(false);
        handleSearch(item.word);
@@ -323,6 +354,12 @@ export default function App() {
   const isQuotaError = error?.toLowerCase().includes("limit") || error?.toLowerCase().includes("quota");
   const levelInfo = getLevelInfo(userStats.xp);
   const nextLevelProgress = ((userStats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100;
+
+  // Determine current image from history if available
+  const currentHistoryItem = wordData 
+      ? history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase()) 
+      : null;
+  const initialImage = currentHistoryItem?.image;
 
   return (
     <div className="min-h-screen bg-tg-bg text-tg-text font-sans relative overflow-x-hidden selection:bg-tg-button selection:text-white">
@@ -500,7 +537,12 @@ export default function App() {
                   </button>
                 )}
                 
-                <WordCard data={wordData} onShare={() => user && handleGamificationAction('SHARE')} />
+                <WordCard 
+                  data={wordData} 
+                  initialImage={initialImage}
+                  onImageLoaded={handleImageLoaded}
+                  onShare={() => user && handleGamificationAction('SHARE')} 
+                />
                 
                 {!window.Telegram?.WebApp && (
                    <button 

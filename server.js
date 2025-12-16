@@ -48,7 +48,8 @@ if (MONGODB_URI) {
                     word: String,
                     timestamp: Number,
                     data: Object,
-                    summary: String
+                    summary: String,
+                    image: String
                 }]
             }, { timestamps: true });
             
@@ -354,8 +355,8 @@ app.post('/api/gamification', async (req, res) => {
              leaderboard = users.sort((a, b) => b.xp - a.xp).slice(0, 50).map((u, index) => ({
                  userId: u.userId,
                  name: u.name || 'Explorer',
-                 photoUrl: u.photoUrl || '',
-                 xp: u.xp,
+                 photoUrl: u.profile.photo,
+                 xp: u.stats.xp,
                  level: u.stats.level,
                  rank: index + 1,
                  badges: u.stats.badges.length
@@ -376,13 +377,18 @@ app.post('/api/gamification', async (req, res) => {
                 word: pl.wordData.word,
                 timestamp: Date.now(),
                 data: pl.wordData,
-                summary: pl.summary || ''
+                summary: pl.summary || '',
+                image: '' // Init empty
             });
             if (history.length > 50) history = history.slice(0, 50);
         }
         if (act === 'SUMMARY' && pl && pl.word && pl.summary) {
             const idx = history.findIndex(h => h.word.toLowerCase() === pl.word.toLowerCase());
             if (idx !== -1) history[idx].summary = pl.summary;
+        }
+        if (act === 'IMAGE' && pl && pl.word && pl.image) {
+            const idx = history.findIndex(h => h.word.toLowerCase() === pl.word.toLowerCase());
+            if (idx !== -1) history[idx].image = pl.image;
         }
         return history;
     };
@@ -402,7 +408,12 @@ app.post('/api/gamification', async (req, res) => {
             
             const stats = user.stats;
             const previousLevel = stats.level;
-            stats.xp += (XP_ACTIONS[action] || 0);
+            
+            // Image action doesn't grant XP
+            if (action !== 'IMAGE') {
+                stats.xp += (XP_ACTIONS[action] || 0);
+            }
+
             if (action === 'SEARCH') stats.wordsDiscovered++;
             if (action === 'SUMMARY') stats.summariesGenerated++;
             if (action === 'SHARE') stats.shares++;
@@ -445,7 +456,9 @@ app.post('/api/gamification', async (req, res) => {
     const newBadges = [];
     const previousLevel = stats.level;
 
-    stats.xp += (XP_ACTIONS[action] || 0);
+    if (action !== 'IMAGE') {
+        stats.xp += (XP_ACTIONS[action] || 0);
+    }
     if (action === 'SEARCH') stats.wordsDiscovered++;
     if (action === 'SUMMARY') stats.summariesGenerated++;
     if (action === 'SHARE') stats.shares++;

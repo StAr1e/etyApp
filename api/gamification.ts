@@ -188,7 +188,8 @@ export default async function handler(request: any, response: any) {
              word: payload.wordData.word,
              timestamp: Date.now(),
              data: payload.wordData,
-             summary: payload.summary || ''
+             summary: payload.summary || '',
+             image: '' // Init empty
            });
            // Limit to 50
            if (user.searchHistory.length > 50) {
@@ -205,10 +206,19 @@ export default async function handler(request: any, response: any) {
           const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
           if (idx !== -1) {
              user.searchHistory[idx].summary = payload.summary;
-             // Move to top if updated? Optional. Let's keep position or move to top.
-             // Let's just update in place for summary.
           }
         }
+      }
+
+      if (action === 'IMAGE') {
+          // No XP for image loading, but we update history
+          if (payload && payload.word && payload.image) {
+              if (!user.searchHistory) user.searchHistory = [];
+              const idx = user.searchHistory.findIndex(h => h.word.toLowerCase() === payload.word.toLowerCase());
+              if (idx !== -1) {
+                  user.searchHistory[idx].image = payload.image;
+              }
+          }
       }
 
       if (action === 'SHARE') stats.shares++;

@@ -1,4 +1,5 @@
 
+
 export interface RootOrigin {
   term: string;
   language: string;
@@ -22,6 +23,7 @@ export interface SearchHistoryItem {
   timestamp: number;
   data?: WordData; // Persisted full data
   summary?: string; // Persisted AI summary
+  image?: string; // Persisted Generated Image (Base64)
 }
 
 // --- Gamification Types ---

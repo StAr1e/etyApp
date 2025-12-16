@@ -5,6 +5,8 @@ import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
   data: WordData;
+  initialImage?: string | null;
+  onImageLoaded?: (base64: string) => void;
   onShare?: () => void;
 }
 
@@ -40,7 +42,7 @@ const writeWavHeader = (samples: Int16Array, sampleRate: number): Blob => {
   return new Blob([view], { type: 'audio/wav' });
 };
 
-export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
+export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageLoaded, onShare }) => {
   // Audio State
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
@@ -49,7 +51,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
   // Image State
-  const [aiImage, setAiImage] = useState<string | null>(null);
+  const [aiImage, setAiImage] = useState<string | null>(initialImage || null);
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
 
@@ -65,7 +67,9 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
       // Pass definition instead of etymology for better visual meaning
       const b64 = await fetchWordImage(data.word, data.definition);
       if (b64) {
-        setAiImage(`data:image/jpeg;base64,${b64}`);
+        const fullImage = `data:image/jpeg;base64,${b64}`;
+        setAiImage(fullImage);
+        if (onImageLoaded) onImageLoaded(fullImage);
       } else {
         setImageError("generation_failed");
       }
@@ -79,15 +83,22 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
     } finally {
       setIsImageLoading(false);
     }
-  }, [data.word, data.definition]);
+  }, [data.word, data.definition, onImageLoaded]);
 
   useEffect(() => {
-    loadImage();
+    // If we have an initial image from history, use it and don't fetch
+    if (initialImage) {
+        setAiImage(initialImage);
+        setIsImageLoading(false);
+    } else {
+        // Otherwise fetch new
+        loadImage();
+    }
     
     // Reset Audio when word changes
     setAudioBlobUrl(null);
     setIsPlaying(false);
-  }, [loadImage]);
+  }, [data.word, initialImage, loadImage]); // Depend on data.word to reset when word changes
 
   // --- AUDIO LOGIC ---
 
@@ -152,24 +163,67 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
     if (audioRef.current) audioRef.current.playbackRate = next;
   };
 
-  const handleDownloadAudio = () => {
-    if (audioBlobUrl) {
-      const a = document.createElement('a');
-      a.href = audioBlobUrl;
-      a.download = `ety_ai_${data.word}.wav`;
-      a.click();
+  // --- ROBUST DOWNLOAD/SHARE LOGIC (Mobile Friendly) ---
+  
+  const handleDownloadAudio = async () => {
+    if (!audioBlobUrl) return;
+
+    try {
+      // 1. Convert Object URL back to Blob
+      const response = await fetch(audioBlobUrl);
+      const blob = await response.blob();
+      const file = new File([blob], `ety_ai_${data.word}.wav`, { type: 'audio/wav' });
+
+      // 2. Try Native Share (Best for Mobile Telegram)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Ety.ai Audio: ${data.word}`,
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("Share failed, falling back to download link", e);
     }
+
+    // 3. Fallback: Classic Link Download (Desktop)
+    const a = document.createElement('a');
+    a.href = audioBlobUrl;
+    a.download = `ety_ai_${data.word}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
-  const handleDownloadImage = () => {
-    if (aiImage) {
-      const a = document.createElement('a');
-      a.href = aiImage;
-      a.download = `ety_ai_${data.word}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+  const handleDownloadImage = async () => {
+    if (!aiImage) return;
+
+    try {
+      // 1. Convert Data URI to Blob
+      const response = await fetch(aiImage);
+      const blob = await response.blob();
+      const file = new File([blob], `ety_ai_${data.word}.jpg`, { type: 'image/jpeg' });
+
+      // 2. Try Native Share (Best for Mobile Telegram - Saves to Photos/Files)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Ety.ai Image: ${data.word}`,
+          text: `Visual representation of ${data.word}`
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("Share failed, falling back to download link", e);
     }
+
+    // 3. Fallback: Classic Link Download (Desktop)
+    const a = document.createElement('a');
+    a.href = aiImage;
+    a.download = `ety_ai_${data.word}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   // --- SHARE & COPY LOGIC ---
@@ -251,7 +305,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
                    handleDownloadImage();
                  }}
                  className="absolute bottom-4 right-4 p-2.5 bg-black/40 hover:bg-black/60 backdrop-blur-md text-white rounded-full transition-all opacity-0 group-hover/img:opacity-100 transform translate-y-2 group-hover/img:translate-y-0 shadow-lg"
-                 title="Download Image"
+                 title="Save Image"
                >
                  <Download size={20} />
                </button>
@@ -295,7 +349,11 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
                {playbackRate}x
              </button>
              {audioBlobUrl && (
-                <button onClick={handleDownloadAudio} className="p-2 text-tg-hint hover:text-tg-text transition-colors">
+                <button 
+                  onClick={handleDownloadAudio} 
+                  className="p-2 text-tg-hint hover:text-tg-text transition-colors"
+                  title="Save Audio"
+                >
                   <Download size={18} />
                 </button>
              )}

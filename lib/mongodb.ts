@@ -63,6 +63,7 @@ export interface IUser {
     timestamp: number;
     data: any; // WordData stored as Mixed/Object
     summary?: string;
+    image?: string;
   }[];
 }
 
@@ -86,7 +87,8 @@ const UserSchema = new mongoose.Schema<IUser>({
     word: String,
     timestamp: Number,
     data: Object,
-    summary: String
+    summary: String,
+    image: String
   }]
 }, { 
   timestamps: true,
