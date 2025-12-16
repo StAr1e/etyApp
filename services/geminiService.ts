@@ -131,61 +131,44 @@ export const fetchWordImage = async (word: string, etymology: string): Promise<s
   const cleanWord = word.trim().toLowerCase();
   if (imageCache.has(cleanWord)) return imageCache.get(cleanWord)!;
 
-  // DEV MODE
-  if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
-     try {
-       const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-       const prompt = `Create a high-quality, artistic, surrealist illustration representing the concept and etymological origin of the word "${word}". Context: ${etymology}. The image should be a symbolic, visual interpretation without any text.`;
-       const result = await ai.models.generateContent({
-         model: 'gemini-2.5-flash-image',
-         contents: { parts: [{ text: prompt }] },
-       });
-       let base64 = null;
-       if (result.candidates?.[0]?.content?.parts) {
-          for(const p of result.candidates[0].content.parts) {
-            if (p.inlineData?.data) {
-               base64 = p.inlineData.data;
-               break;
-            }
-          }
-       }
-       if(base64) {
-         imageCache.set(cleanWord, base64);
-         return base64;
-       }
-       return null;
-     } catch (e) {
-       console.error(e);
-       return null;
-     }
-  }
-
-  // PROD MODE
   try {
-     // Use POST to avoid URL length issues with long etymology
-     const response = await fetch(`/api/image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word, etymology: etymology.substring(0, 500) })
-     });
+    // Construct Prompt for Pollinations
+    // Extract a brief context string from the etymology (first 100 chars clean)
+    const context = etymology.split('.')[0].substring(0, 100).replace(/[^a-zA-Z0-9 ]/g, ' ');
+    
+    // Style: "cute flat vector illustration... cartoon style, bright colors, educational illustration, clean background, modern infographic style"
+    const prompt = `cute flat vector illustration representing the meaning of the word "${word}", context: ${context}, cartoon style, bright colors, educational illustration, clean background, modern infographic style`;
+    
+    const encodedPrompt = encodeURIComponent(prompt);
+    // Pollinations URL (Free, no API key needed)
+    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=768&height=768&nologo=true&seed=${Math.floor(Math.random() * 1000)}`;
 
-     if (response.ok) {
-       const data = await response.json();
-       if (data.image) {
-         imageCache.set(cleanWord, data.image);
-         return data.image;
-       }
-     } else {
-        if (response.status === 429) {
-            throw new Error("QUOTA_EXCEEDED");
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Pollinations API Error");
+
+    const blob = await response.blob();
+    
+    // Convert Blob to Base64
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result && typeof reader.result === 'string') {
+          // Remove the "data:image/jpeg;base64," prefix as WordCard adds it
+          const base64 = reader.result.split(',')[1];
+          imageCache.set(cleanWord, base64);
+          resolve(base64);
+        } else {
+          resolve(null);
         }
-        console.warn(`Image API returned ${response.status}: ${await response.text()}`);
-     }
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+
   } catch (e: any) {
-    if (e.message === "QUOTA_EXCEEDED") throw e;
-    console.error("Error fetching image:", e);
+    console.warn("Image generation failed:", e);
+    return null;
   }
-  return null;
 };
 
 export const fetchWordSummary = async (word: string): Promise<string> => {
