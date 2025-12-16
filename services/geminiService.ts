@@ -254,10 +254,11 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
   try {
     const response = await fetch(`/api/summary?word=${encodeURIComponent(word)}`);
     
-    // Check quota specifically
+    // Check specific error statuses
     if (response.status === 429) return "Daily AI usage limit reached. Please try again tomorrow.";
+    if (response.status === 503) return "The AI is currently overloaded. Please try again in a moment.";
     
-    // Handle HTML/Network Errors
+    // Handle HTML/Network Errors (e.g. 504 Timeout on Vercel)
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
        console.error(`Summary API returned ${response.status} ${contentType}`);
