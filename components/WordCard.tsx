@@ -161,6 +161,17 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
     }
   };
 
+  const handleDownloadImage = () => {
+    if (aiImage) {
+      const a = document.createElement('a');
+      a.href = aiImage;
+      a.download = `ety_ai_${data.word}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  };
+
   // --- SHARE & COPY LOGIC ---
   const handleShare = () => {
     if (onShare) onShare();
@@ -232,6 +243,18 @@ export const WordCard: React.FC<WordCardProps> = ({ data, onShare }) => {
                  className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-105" 
                />
                <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity"></div>
+               
+               {/* DOWNLOAD BUTTON */}
+               <button 
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   handleDownloadImage();
+                 }}
+                 className="absolute bottom-4 right-4 p-2.5 bg-black/40 hover:bg-black/60 backdrop-blur-md text-white rounded-full transition-all opacity-0 group-hover/img:opacity-100 transform translate-y-2 group-hover/img:translate-y-0 shadow-lg"
+                 title="Download Image"
+               >
+                 <Download size={20} />
+               </button>
              </div>
            ) : (
              <div className="w-full h-full flex flex-col items-center justify-center text-tg-hint/50 p-6 text-center">
