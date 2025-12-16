@@ -29,7 +29,8 @@ export default async function handler(request: any, response: any) {
   try {
     const result = await ai.models.generateContent({
       model: 'gemini-flash-lite-latest',
-      contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words. Focus on the most surprising aspect.`,
+      contents: `Story-style etymology summary of "${word}". Max 150 words. Focus on surprise.`,
+      config: { maxOutputTokens: 300 }
     });
     
     const text = result.text || "";

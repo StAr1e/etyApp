@@ -7,7 +7,7 @@ import { HistoryModal } from './components/HistoryModal'; // Import new modal
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock, Send } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -21,7 +21,8 @@ export default function App() {
   const [userStats, setUserStats] = useState<UserStats>(INITIAL_STATS);
   const [showProfile, setShowProfile] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false); // New State
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showWebLoginMessage, setShowWebLoginMessage] = useState(false); // New state for web login prompt
   const [levelUpToast, setLevelUpToast] = useState<{show: boolean, level: number}>({show: false, level: 0});
   
   // Summary State
@@ -40,37 +41,44 @@ export default function App() {
     if (!user) return; // Cannot track if no user ID
 
     // Send payload (word data) to server to persist history
-    const { stats, newBadges, history: serverHistory } = await trackAction(user.id, action as any, payload);
+    // We do not await this to keep UI snappy, unless we need the stats immediately
+    const actionPromise = trackAction(user.id, action as any, payload);
     
-    // Check for level up
-    if (stats.level > userStats.level) {
-      setLevelUpToast({ show: true, level: stats.level });
-      setTimeout(() => setLevelUpToast({ show: false, level: 0 }), 4000);
-      if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-    }
-    
-    // Show badge toast 
-    if (newBadges.length > 0) {
-      if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-    }
+    actionPromise.then(({ stats, newBadges, history: serverHistory }) => {
+      // Check for level up
+      if (stats.level > userStats.level) {
+        setLevelUpToast({ show: true, level: stats.level });
+        setTimeout(() => setLevelUpToast({ show: false, level: 0 }), 4000);
+        if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+      }
+      
+      // Show badge toast 
+      if (newBadges.length > 0) {
+        if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+      }
 
-    setUserStats(stats);
-    
-    // Update local history if server returned it (source of truth)
-    if (serverHistory && serverHistory.length > 0) {
-      setHistory(serverHistory);
-      localStorage.setItem('ety_history', JSON.stringify(serverHistory));
-    }
+      setUserStats(stats);
+      
+      // Update local history if server returned it (source of truth)
+      if (serverHistory && serverHistory.length > 0) {
+        setHistory(serverHistory);
+        localStorage.setItem('ety_history', JSON.stringify(serverHistory));
+      }
+    }).catch(err => console.error("Background gamification sync failed", err));
   };
 
   const handleLogin = () => {
     if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
       setUser(window.Telegram.WebApp.initDataUnsafe.user);
     } else {
-      console.warn("User data not available. Please open this app within Telegram.");
-      // Dev mock user if needed
-      if (import.meta.env.DEV) {
-          setUser({ id: 12345, first_name: "TestUser" } as TelegramUser);
+      // If we are not in Telegram, show the prompt to open the bot
+      setShowWebLoginMessage(true);
+      
+      // In strictly DEV environment, we might still want to mock for testing purposes if needed,
+      // but priority is showing the message as requested.
+      if (import.meta.env.DEV && !showWebLoginMessage) {
+          console.log("DEV Mode: Click login again to mock user if testing logic is needed, or use the modal link.");
+          // setUser({ id: 12345, first_name: "TestUser" } as TelegramUser);
       }
     }
   };
@@ -127,7 +135,7 @@ export default function App() {
           }); 
       }
       
-      // Optimistic local update (in case server request fails or takes time)
+      // Optimistic local update
       const updatedHistory = history.map(item => {
         if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
            return { ...item, summary: text };
@@ -148,6 +156,15 @@ export default function App() {
   // Callback from WordCard when image is successfully generated
   const handleImageLoaded = useCallback((base64Image: string) => {
     if (!wordData) return;
+
+    // Check if we already have this image cached in history for this word
+    // This prevents hitting the DB every time the component remounts or reloads from cache
+    const currentItem = history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase());
+    
+    if (currentItem && currentItem.image === base64Image) {
+        // Already persisted, skip server call
+        return;
+    }
 
     // Save to DB
     if(user) {
@@ -179,7 +196,7 @@ export default function App() {
     try {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
       
-      // 1. Check if we have this exact word with DATA in history first (Client Cache)
+      // 1. Check if we have this exact word with DATA in history first (Client History Cache)
       const localCached = history.find(h => h.word.toLowerCase() === term.toLowerCase() && h.data);
       let data: WordData;
 
@@ -189,16 +206,15 @@ export default function App() {
           // Set summary from history if available
           if(localCached.summary) setSummary(localCached.summary);
       } else {
-          // 2. Fetch from API
+          // 2. Fetch from API (or Service Persistence Layer)
           data = await fetchWordDetails(term);
       }
       
       setWordData(data);
       setView('result');
 
+      // Only track search if it wasn't a recent history click (optional, but let's track it for bumping to top)
       if(user) {
-         // This will save the full data to DB, so next time it is fetched from DB history
-         // Note: If it was cached, calling this again just moves it to top of history stack on backend
          handleGamificationAction('SEARCH', { wordData: data }); 
       } else {
          // Local-only fallback update
@@ -233,10 +249,6 @@ export default function App() {
        setSummary(item.summary || null);
        setView('result');
        setShowHistoryModal(false);
-       
-       // Optionally move to top of history locally/remotely?
-       // For now, let's treat "restore" as just viewing. 
-       // If we want to bump timestamp, we'd call handleSearch(item.word)
      } else {
        setShowHistoryModal(false);
        handleSearch(item.word);
@@ -247,8 +259,6 @@ export default function App() {
      const newHistory = history.filter(h => h.timestamp !== timestamp);
      setHistory(newHistory);
      localStorage.setItem('ety_history', JSON.stringify(newHistory));
-     // Note: We currently don't have an API to delete individual history items from server, 
-     // but local deletion improves UX immediately.
   };
 
   const handleClearHistory = () => {
@@ -304,6 +314,7 @@ export default function App() {
   // Fetch Stats & History when User is Identified
   useEffect(() => {
     if (user) {
+        // We do not await this, we let it populate in background
         fetchUserStats(user).then(({ stats, history: serverHistory }) => {
             setUserStats(stats);
             // Merge server history if available
@@ -557,6 +568,38 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* Web Login Message Modal */}
+      {showWebLoginMessage && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in p-4">
+           <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl border border-white/10 relative">
+              <button 
+                onClick={() => setShowWebLoginMessage(false)}
+                className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+              >
+                <X size={20} />
+              </button>
+              
+              <div className="w-16 h-16 bg-[#229ED9] text-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30">
+                <Send size={32} className="-ml-1 mt-1" />
+              </div>
+              
+              <h3 className="text-xl font-bold mb-2">Login with Telegram</h3>
+              <p className="text-sm opacity-70 mb-6 leading-relaxed">
+                To save your progress, earn badges, and track history, please open this app inside Telegram.
+              </p>
+              
+              <a 
+                href="https://t.me/newetybot" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="block w-full py-3.5 bg-[#229ED9] hover:bg-[#1b8abf] text-white font-bold rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-500/20"
+              >
+                Open @newetybot
+              </a>
+           </div>
+        </div>
+      )}
 
       {/* Level Up Toast */}
       {levelUpToast.show && (

@@ -50,16 +50,16 @@ export default async function handler(request: any, response: any) {
               meaning: { type: Type.STRING },
             }
           },
-          description: "List of 2-3 ancestral roots (e.g., Latin, Greek, Old English) leading to this word."
+          description: "List of 2-3 ancestral roots."
         },
         examples: { type: Type.ARRAY, items: { type: Type.STRING } },
         synonyms: { type: Type.ARRAY, items: { type: Type.STRING } },
-        funFact: { type: Type.STRING, description: "A short, surprising trivia fact about the word." },
+        funFact: { type: Type.STRING, description: "A short, surprising trivia fact." },
       },
       required: ["word", "phonetic", "definition", "etymology", "roots", "examples", "synonyms", "funFact"]
     };
 
-    const prompt = `Analyze the word "${word}" for an etymology dictionary app. Provide precise, academic but accessible details. If the word is misspelled, analyze the closest correct word.`;
+    const prompt = `Analyze "${word}" for etymology app. Precise, concise details.`;
 
     const result = await ai.models.generateContent({
       model: 'gemini-flash-lite-latest',
@@ -67,7 +67,8 @@ export default async function handler(request: any, response: any) {
       config: {
         responseMimeType: 'application/json',
         responseSchema: schema,
-        systemInstruction: "You are an expert etymologist. Your goal is to explain word origins clearly."
+        systemInstruction: "Expert etymologist. Concise.",
+        maxOutputTokens: 1000 // Performance Limit
       }
     });
 
@@ -95,7 +96,7 @@ export default async function handler(request: any, response: any) {
         return response.status(200).json(parsedData);
     } catch (parseError) {
         console.error("JSON Parse Error:", text);
-        return response.status(500).json({ error: "Failed to parse AI response. The model returned invalid JSON.", details: text.substring(0, 100) });
+        return response.status(500).json({ error: "Failed to parse AI response.", details: text.substring(0, 100) });
     }
 
   } catch (error: any) {

@@ -12,11 +12,49 @@ declare global {
   }
 }
 
-// --- CLIENT SIDE CACHE ---
-// Simple in-memory cache to prevent re-fetching the same word in one session
-const wordCache = new Map<string, WordData>();
-const summaryCache = new Map<string, string>();
-const imageCache = new Map<string, string>();
+// --- CLIENT SIDE PERSISTENT CACHE ---
+
+// Helper to load map from local storage with expiry check (7 days)
+const loadCache = <T>(key: string): Map<string, { data: T, timestamp: number }> => {
+  try {
+    const item = localStorage.getItem(key);
+    if (item) {
+      const parsed = JSON.parse(item);
+      const now = Date.now();
+      const validEntries = Object.entries(parsed).filter(([, val]: any) => {
+        // Expire after 7 days
+        return (now - (val.timestamp || 0)) < 7 * 24 * 60 * 60 * 1000;
+      }) as [string, { data: T, timestamp: number }][];
+      
+      return new Map(validEntries);
+    }
+  } catch (e) {
+    console.warn("Failed to load cache", e);
+  }
+  return new Map();
+};
+
+const saveCache = (key: string, map: Map<string, any>) => {
+  try {
+    // Limit cache size to 100 items to prevent localStorage quota issues
+    if (map.size > 100) {
+      const iter = map.keys();
+      const head = iter.next().value;
+      if (head) map.delete(head);
+    }
+    const obj = Object.fromEntries(map);
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch (e) {
+    console.warn("Failed to save cache (likely quota exceeded)", e);
+  }
+};
+
+// Initialize Caches
+const wordCache = loadCache<WordData>('gemini_word_cache_v1');
+const summaryCache = loadCache<string>('gemini_summary_cache_v1');
+// Images are heavy, so we keep them in-memory only here. 
+// Persistence is handled by the App's History mechanism which manages its own size.
+const imageCache = new Map<string, string>(); 
 
 // Helper to decode base64 audio
 const decodeAudio = (base64: string): ArrayBuffer => {
@@ -63,9 +101,10 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
   const cleanWord = word.trim().toLowerCase();
   
   // 1. Check Cache
-  if (wordCache.has(cleanWord)) {
+  const cached = wordCache.get(cleanWord);
+  if (cached) {
     console.log(`⚡ Cache hit for: ${cleanWord}`);
-    return wordCache.get(cleanWord)!;
+    return cached.data;
   }
 
   // HYBRID MODE: Direct Client Call (Only works if VITE_GEMINI_API_KEY is in .env)
@@ -79,11 +118,16 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
         config: {
           responseMimeType: 'application/json',
           responseSchema: WORD_SCHEMA,
-          systemInstruction: "You are an expert etymologist."
+          systemInstruction: "You are an expert etymologist.",
+          maxOutputTokens: 1000, // Optimize speed
         }
       });
       const data = JSON.parse(response.text!) as WordData;
-      wordCache.set(cleanWord, data); // Save to cache
+      
+      // Save Cache
+      wordCache.set(cleanWord, { data, timestamp: Date.now() });
+      saveCache('gemini_word_cache_v1', wordCache);
+      
       return data;
     } catch (e: any) {
       console.error("Local Dev Error:", e);
@@ -119,7 +163,11 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
     }
 
     const data = await response.json();
-    wordCache.set(cleanWord, data); // Save to cache
+    
+    // Save Cache
+    wordCache.set(cleanWord, { data, timestamp: Date.now() });
+    saveCache('gemini_word_cache_v1', wordCache);
+
     return data as WordData;
   } catch (error: any) {
     console.error("Error fetching word details:", error);
@@ -174,8 +222,9 @@ export const fetchWordImage = async (word: string, etymology: string): Promise<s
 export const fetchWordSummary = async (word: string): Promise<string> => {
   const cleanWord = word.trim().toLowerCase();
   
-  if (summaryCache.has(cleanWord)) {
-    return summaryCache.get(cleanWord)!;
+  const cached = summaryCache.get(cleanWord);
+  if (cached) {
+    return cached.data;
   }
 
   if (import.meta.env.DEV && import.meta.env.VITE_GEMINI_API_KEY) {
@@ -184,9 +233,13 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
       const response = await ai.models.generateContent({
         model: 'gemini-flash-lite-latest',
         contents: `Write a fascinating, storytelling-style deep dive summary about the hidden history and evolution of the word "${word}". Keep it under 150 words.`,
+        config: { maxOutputTokens: 300 }
       });
       const text = response.text || "No summary available.";
-      summaryCache.set(cleanWord, text);
+      
+      summaryCache.set(cleanWord, { data: text, timestamp: Date.now() });
+      saveCache('gemini_summary_cache_v1', summaryCache);
+      
       return text;
     } catch (e: any) { 
         if (e.message?.includes('429') || e.message?.toLowerCase().includes('quota')) {
@@ -203,7 +256,10 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
     if (!response.ok) throw new Error("Failed to fetch summary");
     const data = await response.json();
     const text = data.summary || "Could not generate summary.";
-    summaryCache.set(cleanWord, text);
+    
+    summaryCache.set(cleanWord, { data: text, timestamp: Date.now() });
+    saveCache('gemini_summary_cache_v1', summaryCache);
+    
     return text;
   } catch (error) {
     return "Sorry, I couldn't generate a summary right now.";
