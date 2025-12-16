@@ -257,11 +257,12 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
     // Check quota specifically
     if (response.status === 429) return "Daily AI usage limit reached. Please try again tomorrow.";
     
-    // Validate Content-Type to avoid parsing HTML error pages (common in Vercel timeouts) as JSON
+    // Handle HTML/Network Errors
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
        console.error(`Summary API returned ${response.status} ${contentType}`);
-       return "Service temporarily unavailable. Please try again later.";
+       if (response.status === 504) return "Timeout: The server took too long to respond. Please try again.";
+       return `Server Error (${response.status}): Service temporarily unavailable.`;
     }
 
     if (!response.ok) {
@@ -284,12 +285,20 @@ export const fetchWordSummary = async (word: string): Promise<string> => {
   } catch (error: any) {
     console.error("Fetch Summary Error:", error);
     
-    // Return the actual error message if it's a configuration/server issue
+    // Return specific messages for display in the UI
     if (error.message?.includes("Configuration") || error.message?.includes("API Key")) {
         return `⚠️ ${error.message}`;
     }
     if (error.message?.includes("limit") || error.message?.includes("quota")) {
         return "Daily AI usage limit reached. Please try again tomorrow.";
+    }
+    if (error.message?.includes("Timeout")) {
+        return "The AI took too long to think. Please try again.";
+    }
+    
+    // If it is the Error object thrown above with a message, return that message
+    if (error.message && error.message !== "Failed to fetch summary") {
+        return `Error: ${error.message}`;
     }
     
     return "Sorry, I couldn't generate a summary right now.";

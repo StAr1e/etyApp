@@ -30,11 +30,19 @@ export default async function handler(request: any, response: any) {
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    const result = await ai.models.generateContent({
+    // Wrap Gemini call in a timeout promise to prevent Vercel 504 HTML errors
+    const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Timeout: AI generation took too long.")), 9500)
+    );
+
+    const generationPromise = ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: `Story-style etymology summary of "${word}". Max 150 words. Focus on surprise.`,
       config: { maxOutputTokens: 300 }
     });
+
+    // Race the generation against the timeout
+    const result: any = await Promise.race([generationPromise, timeoutPromise]);
     
     const text = result.text || "";
 
@@ -50,8 +58,15 @@ export default async function handler(request: any, response: any) {
     console.error("API Error:", error);
     
     const msg = error.message?.toLowerCase() || "";
+    
+    // Handle Quota Limits
     if (error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
        return response.status(429).json({ error: "Daily AI usage limit reached." });
+    }
+
+    // Handle Timeouts specially
+    if (msg.includes("timeout")) {
+        return response.status(504).json({ error: "AI generation timed out. Please try again." });
     }
 
     return response.status(500).json({ error: error.message || "Failed to generate summary" });

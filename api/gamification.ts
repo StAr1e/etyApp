@@ -77,12 +77,13 @@ const executeWithRetry = async (operation: () => Promise<any>, retries = 5, init
       lastError = error;
       // Retry on VersionError (concurrency) or Duplicate Key (race condition on create)
       if (error.name === 'VersionError' || error.code === 11000) {
-        // Exponential backoff with jitter: 50ms, 100ms, 200ms...
+        // Exponential backoff with jitter: 50ms, 100ms, 200ms... + random jitter
         const jitter = Math.random() * 50;
         const delay = (initialDelay * Math.pow(2, i)) + jitter;
         await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
+      // If it's not a concurrency error, throw immediately
       throw error;
     }
   }
@@ -199,6 +200,7 @@ export default async function handler(request: any, response: any) {
                stats: { ...INITIAL_STATS },
                searchHistory: []
              });
+             // Force save to create
              await user.save();
           }
 
