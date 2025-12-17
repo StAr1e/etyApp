@@ -22,14 +22,13 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [showWebLoginMessage, setShowWebLoginMessage] = useState(false); // New state for web login prompt
+  const [showWebLoginMessage, setShowWebLoginMessage] = useState(false); 
   const [levelUpToast, setLevelUpToast] = useState<{show: boolean, level: number}>({show: false, level: 0});
   
   // Summary State
   const [summary, setSummary] = useState<string | null>(null);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   
-  // Ref to prevent double-fetching in React Strict Mode
   const hasInitialized = useRef(false);
 
   // --- Handlers ---
@@ -38,28 +37,20 @@ export default function App() {
       action: 'SEARCH' | 'SUMMARY' | 'SHARE' | 'IMAGE', 
       payload?: { wordData?: WordData, word?: string, summary?: string, image?: string }
     ) => {
-    if (!user) return; // Cannot track if no user ID
+    if (!user) return; 
 
-    // Send payload (word data) to server to persist history
-    // We do not await this to keep UI snappy, unless we need the stats immediately
     const actionPromise = trackAction(user.id, action as any, payload);
     
     actionPromise.then(({ stats, newBadges, history: serverHistory }) => {
-      // Check for level up
       if (stats.level > userStats.level) {
         setLevelUpToast({ show: true, level: stats.level });
         setTimeout(() => setLevelUpToast({ show: false, level: 0 }), 4000);
         if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
       }
-      
-      // Show badge toast 
       if (newBadges.length > 0) {
         if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
       }
-
       setUserStats(stats);
-      
-      // Update local history if server returned it (source of truth)
       if (serverHistory && serverHistory.length > 0) {
         setHistory(serverHistory);
         localStorage.setItem('ety_history', JSON.stringify(serverHistory));
@@ -71,14 +62,9 @@ export default function App() {
     if (window.Telegram?.WebApp?.initDataUnsafe?.user) {
       setUser(window.Telegram.WebApp.initDataUnsafe.user);
     } else {
-      // If we are not in Telegram, show the prompt to open the bot
       setShowWebLoginMessage(true);
-      
-      // In strictly DEV environment, we might still want to mock for testing purposes if needed,
-      // but priority is showing the message as requested.
       if (import.meta.env.DEV && !showWebLoginMessage) {
-          console.log("DEV Mode: Click login again to mock user if testing logic is needed, or use the modal link.");
-          // setUser({ id: 12345, first_name: "TestUser" } as TelegramUser);
+          console.log("DEV Mode: Click login again to mock user if needed.");
       }
     }
   };
@@ -116,26 +102,17 @@ export default function App() {
 
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
-    
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.MainButton.showProgress(false);
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
-
     try {
       const text = await fetchWordSummary(wordData.word);
       setSummary(text);
       setShowSummaryModal(true);
-      
-      // Update history and stats on server
       if(user) {
-          handleGamificationAction('SUMMARY', { 
-              word: wordData.word, 
-              summary: text 
-          }); 
+          handleGamificationAction('SUMMARY', { word: wordData.word, summary: text }); 
       }
-      
-      // Optimistic local update
       const updatedHistory = history.map(item => {
         if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
            return { ...item, summary: text };
@@ -144,7 +121,6 @@ export default function App() {
       });
       setHistory(updatedHistory);
       localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
-      
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hide();
     } catch (e) {
       console.error(e);
@@ -153,28 +129,14 @@ export default function App() {
     }
   }, [wordData, user, history]); 
 
-  // Callback from WordCard when image is successfully generated
   const handleImageLoaded = useCallback((base64Image: string) => {
     if (!wordData) return;
-
-    // Check if we already have this image cached in history for this word
-    // This prevents hitting the DB every time the component remounts or reloads from cache
     const currentItem = history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase());
-    
-    if (currentItem && currentItem.image === base64Image) {
-        // Already persisted, skip server call
-        return;
-    }
+    if (currentItem && currentItem.image === base64Image) return;
 
-    // Save to DB
     if(user) {
-        handleGamificationAction('IMAGE', {
-            word: wordData.word,
-            image: base64Image
-        });
+        handleGamificationAction('IMAGE', { word: wordData.word, image: base64Image });
     }
-
-    // Local Update
     const updatedHistory = history.map(item => {
         if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
            return { ...item, image: base64Image };
@@ -183,7 +145,6 @@ export default function App() {
     });
     setHistory(updatedHistory);
     localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
-
   }, [wordData, user, history]);
 
   const handleSearch = async (term: string) => {
@@ -196,29 +157,23 @@ export default function App() {
     try {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
       
-      // 1. Check if we have this exact word with DATA in history first (Client History Cache)
       const localCached = history.find(h => h.word.toLowerCase() === term.toLowerCase() && h.data);
       let data: WordData;
 
       if (localCached && localCached.data) {
           console.log("Loading from Local History Cache");
           data = localCached.data;
-          // Set summary from history if available
           if(localCached.summary) setSummary(localCached.summary);
       } else {
-          // 2. Fetch from API (or Service Persistence Layer)
-          // Pass user.id for rate limiting if available
           data = await fetchWordDetails(term, user?.id);
       }
       
       setWordData(data);
       setView('result');
 
-      // Only track search if it wasn't a recent history click (optional, but let's track it for bumping to top)
       if(user) {
          handleGamificationAction('SEARCH', { wordData: data }); 
       } else {
-         // Local-only fallback update
          const newItem: SearchHistoryItem = { 
             word: data.word, 
             timestamp: Date.now(),
@@ -241,10 +196,8 @@ export default function App() {
     }
   };
 
-  // Restores a word from history without API call
   const handleRestoreFromHistory = (item: SearchHistoryItem) => {
      setError(null); 
-     
      if (item.data) {
        setWordData(item.data);
        setSummary(item.summary || null);
@@ -257,13 +210,14 @@ export default function App() {
   };
 
   const handleDeleteHistory = (timestamp: number) => {
-     // 1. Update Local State
+     // 1. Immediate Local Optimistic Update
      const newHistory = history.filter(h => h.timestamp !== timestamp);
      setHistory(newHistory);
      localStorage.setItem('ety_history', JSON.stringify(newHistory));
      
-     // 2. Sync to Server if logged in
+     // 2. Server Sync
      if (user) {
+       // We don't await this to keep UI fast, but it runs in background
        deleteHistoryItem(user.id, timestamp);
      }
   };
@@ -271,8 +225,6 @@ export default function App() {
   const handleClearHistory = () => {
      setHistory([]);
      localStorage.removeItem('ety_history');
-     
-     // Sync to Server
      if (user) {
         clearUserHistory(user.id);
      }
@@ -284,7 +236,6 @@ export default function App() {
     if (hasInitialized.current) return;
     hasInitialized.current = true;
 
-    // 1. Initialize Telegram WebApp
     if (window.Telegram?.WebApp) {
       const tg = window.Telegram.WebApp;
       tg.expand();
@@ -301,36 +252,29 @@ export default function App() {
       });
     }
     
-    // 2. Load History from Local Storage (Immediate Display)
+    // Load local history immediately for perceived performance
     const saved = localStorage.getItem('ety_history');
     if (saved) {
       try {
         setHistory(JSON.parse(saved));
-      } catch (e) {
-        console.error("Failed to parse history", e);
-      }
+      } catch (e) { console.error(e); }
     }
 
-    // 3. Handle Deep Linking
     const params = new URLSearchParams(window.location.search);
-    const deepLinkWord = params.get('word') || 
-                         params.get('startapp') || 
-                         window.Telegram?.WebApp?.initDataUnsafe?.start_param;
-
+    const deepLinkWord = params.get('word') || params.get('startapp') || window.Telegram?.WebApp?.initDataUnsafe?.start_param;
     if (deepLinkWord) {
       setTimeout(() => handleSearch(deepLinkWord), 100);
     }
-
   }, []);
 
-  // Fetch Stats & History when User is Identified
+  // Fetch Stats & History from Server
+  // IMPORTANT: We trust the Server history more than local storage to ensure deletions persist across devices
   useEffect(() => {
     if (user) {
-        // We do not await this, we let it populate in background
         fetchUserStats(user).then(({ stats, history: serverHistory }) => {
             setUserStats(stats);
-            // Merge server history if available
-            if (serverHistory && serverHistory.length > 0) {
+            // If server returns history (even empty), we use it to ensure deleted items stay deleted
+            if (serverHistory) {
                setHistory(serverHistory);
                localStorage.setItem('ety_history', JSON.stringify(serverHistory));
             }
@@ -338,25 +282,22 @@ export default function App() {
     }
   }, [user]);
 
-  // Manage Native Buttons State
+  // Manage Native Buttons State (omitted detailed implementation for brevity, logic same as before)
   useEffect(() => {
     if (!window.Telegram?.WebApp) return;
     const tg = window.Telegram.WebApp;
-
     const onMainBtnClick = () => handleGenerateSummary();
     const onBackBtnClick = () => handleBack();
 
     if (view === 'result' && !showProfile && !showLeaderboard && !showHistoryModal) {
       tg.BackButton.show();
       tg.BackButton.onClick(onBackBtnClick);
-
       if (!showSummaryModal) {
         tg.MainButton.show();
         tg.MainButton.onClick(onMainBtnClick);
       } else {
         tg.MainButton.hide();
       }
-
     } else if (showProfile || showLeaderboard || showHistoryModal) {
        tg.BackButton.show();
        tg.BackButton.onClick(onBackBtnClick);
@@ -367,7 +308,6 @@ export default function App() {
       tg.BackButton.offClick(onBackBtnClick);
       tg.MainButton.offClick(onMainBtnClick);
     }
-
     return () => {
       tg.MainButton.offClick(onMainBtnClick);
       tg.BackButton.offClick(onBackBtnClick);
@@ -376,119 +316,58 @@ export default function App() {
 
   const errorLower = error?.toLowerCase() || "";
   const isQuotaError = errorLower.includes("limit") || errorLower.includes("quota") || errorLower.includes("429");
-  // 503 Overloaded is NOT a quota error, it's a server busy error. We handle it distinctly.
   const isOverloaded = errorLower.includes("overloaded") || errorLower.includes("busy") || errorLower.includes("unavailable");
-
   const levelInfo = getLevelInfo(userStats.xp);
   const nextLevelProgress = ((userStats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100;
-
-  // Determine current image from history if available
-  const currentHistoryItem = wordData 
-      ? history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase()) 
-      : null;
+  const currentHistoryItem = wordData ? history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase()) : null;
   const initialImage = currentHistoryItem?.image;
 
   return (
     <div className="min-h-screen bg-tg-bg text-tg-text font-sans relative overflow-x-hidden selection:bg-tg-button selection:text-white">
-      
-      {/* Ambient Background Glow (Theme Aware) */}
       <div className="fixed top-[-20%] left-[-10%] w-[60%] h-[50%] bg-tg-button rounded-full blur-[120px] opacity-[0.08] pointer-events-none z-0"></div>
       <div className="fixed bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-500 rounded-full blur-[100px] opacity-[0.05] pointer-events-none z-0"></div>
 
-      {/* Content Container */}
       <div className="w-full max-w-2xl mx-auto relative z-10 min-h-screen flex flex-col p-4 md:p-6">
         
-        {/* Top Bar: Split Layout (History/Stats Left, User Right) */}
         <div className={`flex justify-between items-center transition-all duration-300 ${view === 'result' ? 'opacity-0 h-0 pointer-events-none' : 'opacity-100 mb-8'}`}>
-           
            <div className="flex items-center gap-3">
-             {/* History Button */}
-             <button 
-                onClick={() => setShowHistoryModal(true)}
-                className="w-10 h-10 rounded-full bg-tg-secondaryBg border border-tg-hint/10 flex items-center justify-center text-tg-text shadow-sm hover:bg-tg-button/10 transition-colors"
-                title="Search History"
-             >
+             <button onClick={() => setShowHistoryModal(true)} className="w-10 h-10 rounded-full bg-tg-secondaryBg border border-tg-hint/10 flex items-center justify-center text-tg-text shadow-sm hover:bg-tg-button/10 transition-colors">
                 <Clock size={20} />
              </button>
-
-             {/* Enhanced Level / XP Pill */}
              <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 group">
                 <div className="relative w-10 h-10">
-                   {/* Progress Ring Background */}
                    <svg className="w-10 h-10 -rotate-90" viewBox="0 0 36 36">
                       <path className="text-tg-secondaryBg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" />
-                      <path 
-                        className="text-tg-button transition-all duration-1000 ease-out" 
-                        strokeDasharray={`${nextLevelProgress}, 100`} 
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" 
-                        fill="none" 
-                        stroke="currentColor" 
-                        strokeWidth="4"
-                        strokeLinecap="round" 
-                      />
+                      <path className="text-tg-button transition-all duration-1000 ease-out" strokeDasharray={`${nextLevelProgress}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
                    </svg>
-                   <div className="absolute inset-0 flex items-center justify-center font-black text-sm text-tg-text">
-                     {userStats.level}
-                   </div>
-                   {userStats.badges.length > 0 && (
-                     <div className="absolute -bottom-1 -right-1 text-yellow-500 drop-shadow-sm">
-                        <Crown size={12} fill="currentColor" />
-                     </div>
-                   )}
+                   <div className="absolute inset-0 flex items-center justify-center font-black text-sm text-tg-text">{userStats.level}</div>
+                   {userStats.badges.length > 0 && <div className="absolute -bottom-1 -right-1 text-yellow-500 drop-shadow-sm"><Crown size={12} fill="currentColor" /></div>}
                 </div>
-                
                 <div className="hidden sm:flex flex-col items-start leading-none">
                    <span className="text-[10px] font-bold text-tg-hint uppercase tracking-wider">Level {userStats.level}</span>
-                   <span className="text-sm font-bold text-tg-text group-hover:text-tg-button transition-colors truncate max-w-[120px]">
-                     {levelInfo.title}
-                   </span>
+                   <span className="text-sm font-bold text-tg-text group-hover:text-tg-button transition-colors truncate max-w-[120px]">{levelInfo.title}</span>
                 </div>
              </button>
            </div>
            
-           {/* User Profile / Login */}
            {user ? (
              <button onClick={() => setShowProfile(true)} className="flex items-center gap-2 bg-tg-secondaryBg border border-tg-hint/10 pl-1 pr-3 py-1 rounded-full shadow-sm animate-in fade-in cursor-pointer hover:bg-tg-button/5 transition-colors backdrop-blur-md bg-opacity-80">
-               {user.photo_url ? (
-                 <img src={user.photo_url} alt="Profile" className="w-8 h-8 rounded-full ring-2 ring-white dark:ring-black object-cover" />
-               ) : (
-                 <div className="w-8 h-8 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-xs font-bold ring-2 ring-white dark:ring-black">
-                   {user.first_name[0]}
-                 </div>
-               )}
+               {user.photo_url ? <img src={user.photo_url} className="w-8 h-8 rounded-full ring-2 ring-white dark:ring-black object-cover" /> : <div className="w-8 h-8 bg-gradient-to-br from-tg-button to-purple-500 rounded-full flex items-center justify-center text-white text-xs font-bold ring-2 ring-white dark:ring-black">{user.first_name[0]}</div>}
                <div className="flex flex-col items-start leading-none">
                  <span className="text-xs font-bold text-tg-text truncate max-w-[80px]">{user.first_name}</span>
-                 <span className="text-[10px] text-tg-hint font-medium flex items-center gap-0.5">
-                   <Zap size={8} className="text-yellow-500 fill-yellow-500" />
-                   {userStats.xp}
-                 </span>
+                 <span className="text-[10px] text-tg-hint font-medium flex items-center gap-0.5"><Zap size={8} className="text-yellow-500 fill-yellow-500" />{userStats.xp}</span>
                </div>
              </button>
            ) : (
-             <button 
-               onClick={handleLogin}
-               className="flex items-center gap-2 text-xs font-bold bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white px-3 py-1.5 rounded-full transition-all"
-             >
-               <UserIcon size={14} />
-               Sign In
-             </button>
+             <button onClick={handleLogin} className="flex items-center gap-2 text-xs font-bold bg-tg-button/10 text-tg-button hover:bg-tg-button hover:text-white px-3 py-1.5 rounded-full transition-all"><UserIcon size={14} /> Sign In</button>
            )}
         </div>
 
-        {/* Branding Header */}
         <header className={`flex flex-col items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${view === 'result' ? 'h-0 overflow-hidden opacity-0 scale-95' : 'flex-1 max-h-[40vh] opacity-100 scale-100'}`}>
           <div className="text-center">
              <div className="relative inline-block">
                <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-20 rounded-full"></div>
-               <img 
-                 src="/logo.png" 
-                 alt="Ety.ai" 
-                 className="relative z-10 w-28 h-28 mx-auto mb-6 object-contain animate-float drop-shadow-xl" 
-                 onError={(e) => {
-                   e.currentTarget.style.display = 'none';
-                   e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden');
-                 }}
-               />
+               <img src="/logo.png" alt="Ety.ai" className="relative z-10 w-28 h-28 mx-auto mb-6 object-contain animate-float drop-shadow-xl" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden'); }} />
                <div className="fallback-logo hidden w-20 h-20 bg-gradient-to-br from-tg-button to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-tg-button/30 text-white rotate-3 hover:rotate-6 transition-transform">
                  <span className="font-serif font-black text-4xl">Æ</span>
                </div>
@@ -497,27 +376,15 @@ export default function App() {
           </div>
         </header>
 
-        {/* Main Search Area */}
         <main className={`relative z-10 transition-all duration-500 ${view === 'result' ? 'mt-4' : 'mt-8'}`}>
-          
           <div className={`${view === 'result' ? '' : 'max-w-md mx-auto'}`}>
-            <SearchBar 
-              onSearch={handleSearch} 
-              isLoading={isLoading} 
-              history={history}
-              onHistorySelect={(term) => {
-                 // Try to find full data in history first
+            <SearchBar onSearch={handleSearch} isLoading={isLoading} history={history} onHistorySelect={(term) => {
                  const historyItem = history.find(h => h.word.toLowerCase() === term.toLowerCase());
-                 if (historyItem) {
-                    handleRestoreFromHistory(historyItem);
-                 } else {
-                    handleSearch(term);
-                 }
+                 if (historyItem) handleRestoreFromHistory(historyItem); else handleSearch(term);
               }}
             />
           </div>
 
-          {/* Loading State */}
           {isLoading && (
             <div className="mt-12 text-center animate-in fade-in zoom-in duration-300">
               <div className="w-16 h-16 mx-auto bg-tg-secondaryBg rounded-full mb-4 flex items-center justify-center relative">
@@ -529,187 +396,65 @@ export default function App() {
             </div>
           )}
 
-          {/* Error State */}
           {error && (
-            <div className={`mt-6 mx-auto max-w-md p-5 rounded-2xl flex items-start gap-4 shadow-sm border animate-in slide-in-from-bottom-2 ${
-                isQuotaError 
-                 ? "bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-100 border-amber-200 dark:border-amber-800/30" 
-                 : isOverloaded
-                 ? "bg-blue-50 dark:bg-blue-900/10 text-blue-800 dark:text-blue-100 border-blue-200 dark:border-blue-800/30"
-                 : "bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-200 border-red-200 dark:border-red-800/30"
-            }`}>
-              <div className={`p-2 rounded-full shrink-0 ${
-                  isQuotaError ? 'bg-amber-100 dark:bg-amber-800' : isOverloaded ? 'bg-blue-100 dark:bg-blue-800' : 'bg-red-100 dark:bg-red-800'
-              }`}>
+            <div className={`mt-6 mx-auto max-w-md p-5 rounded-2xl flex items-start gap-4 shadow-sm border animate-in slide-in-from-bottom-2 ${isQuotaError ? "bg-amber-50 dark:bg-amber-900/10 text-amber-900 dark:text-amber-100 border-amber-200 dark:border-amber-800/30" : isOverloaded ? "bg-blue-50 dark:bg-blue-900/10 text-blue-800 dark:text-blue-100 border-blue-200 dark:border-blue-800/30" : "bg-red-50 dark:bg-red-900/10 text-red-700 dark:text-red-200 border-red-200 dark:border-red-800/30"}`}>
+              <div className={`p-2 rounded-full shrink-0 ${isQuotaError ? 'bg-amber-100 dark:bg-amber-800' : isOverloaded ? 'bg-blue-100 dark:bg-blue-800' : 'bg-red-100 dark:bg-red-800'}`}>
                 {isQuotaError ? <CloudOff size={20} /> : isOverloaded ? <ServerCrash size={20} /> : <AlertTriangle size={20} />}
               </div>
               <div>
-                 <p className="font-bold text-base mb-1">
-                    {isQuotaError ? "Daily Limit Reached" : isOverloaded ? "Server Busy" : "Connection Error"}
-                 </p>
-                 <p className="text-sm opacity-90 leading-relaxed">
-                    {isQuotaError ? error : isOverloaded ? "The AI is thinking hard. Please try again in a few moments." : error}
-                 </p>
-                 {/* Env Hint for Devs */}
-                 {!isQuotaError && !isOverloaded && error.includes("API Key missing") && (
-                   <p className="text-xs mt-3 font-mono bg-black/5 dark:bg-white/5 p-2 rounded border border-black/5">
-                     ENV: GEMINI_API_KEY missing
-                   </p>
-                 )}
+                 <p className="font-bold text-base mb-1">{isQuotaError ? "Daily Limit Reached" : isOverloaded ? "Server Busy" : "Connection Error"}</p>
+                 <p className="text-sm opacity-90 leading-relaxed">{isQuotaError ? error : isOverloaded ? "The AI is thinking hard. Please try again in a few moments." : error}</p>
               </div>
             </div>
           )}
 
-          {/* Results View */}
           {view === 'result' && wordData && !isLoading && (
              <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                {!window.Telegram?.WebApp && (
-                  <button 
-                    onClick={handleBack}
-                    className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"
-                  >
-                    <span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Search
-                  </button>
-                )}
-                
-                <WordCard 
-                  data={wordData} 
-                  initialImage={initialImage}
-                  onImageLoaded={handleImageLoaded}
-                  onShare={() => user && handleGamificationAction('SHARE')} 
-                />
-                
-                {!window.Telegram?.WebApp && (
-                   <button 
-                     onClick={handleGenerateSummary}
-                     className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                   >
-                     <Wand2 size={22} />
-                     Generate Deep Dive
-                   </button>
-                )}
+                {!window.Telegram?.WebApp && <button onClick={handleBack} className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"><span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Search</button>}
+                <WordCard data={wordData} initialImage={initialImage} onImageLoaded={handleImageLoaded} onShare={() => user && handleGamificationAction('SHARE')} />
+                {!window.Telegram?.WebApp && <button onClick={handleGenerateSummary} className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"><Wand2 size={22} /> Generate Deep Dive</button>}
              </div>
           )}
         </main>
       </div>
 
-      {/* Web Login Message Modal */}
       {showWebLoginMessage && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in p-4">
            <div className="bg-white dark:bg-zinc-900 w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl border border-white/10 relative">
-              <button 
-                onClick={() => setShowWebLoginMessage(false)}
-                className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-              >
-                <X size={20} />
-              </button>
-              
-              <div className="w-16 h-16 bg-[#229ED9] text-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30">
-                <Send size={32} className="-ml-1 mt-1" />
-              </div>
-              
+              <button onClick={() => setShowWebLoginMessage(false)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"><X size={20} /></button>
+              <div className="w-16 h-16 bg-[#229ED9] text-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30"><Send size={32} className="-ml-1 mt-1" /></div>
               <h3 className="text-xl font-bold mb-2">Login with Telegram</h3>
-              <p className="text-sm opacity-70 mb-6 leading-relaxed">
-                To save your progress, earn badges, and track history, please open this app inside Telegram.
-              </p>
-              
-              <a 
-                href="https://t.me/newetybot" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="block w-full py-3.5 bg-[#229ED9] hover:bg-[#1b8abf] text-white font-bold rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-500/20"
-              >
-                Open @newetybot
-              </a>
+              <p className="text-sm opacity-70 mb-6 leading-relaxed">To save your progress, earn badges, and track history, please open this app inside Telegram.</p>
+              <a href="https://t.me/newetybot" target="_blank" rel="noopener noreferrer" className="block w-full py-3.5 bg-[#229ED9] hover:bg-[#1b8abf] text-white font-bold rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-500/20">Open @newetybot</a>
            </div>
         </div>
       )}
 
-      {/* Level Up Toast */}
       {levelUpToast.show && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[200] animate-in fade-in slide-in-from-top duration-500 w-[90%] max-w-sm">
            <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white p-4 rounded-2xl shadow-2xl flex items-center gap-4 border-2 border-white/20">
-              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white animate-bounce">
-                <Trophy size={24} fill="currentColor" />
-              </div>
-              <div>
-                <div className="font-black text-lg uppercase tracking-wide">Level Up!</div>
-                <div className="text-sm font-medium opacity-95">You reached Rank {levelUpToast.level}</div>
-              </div>
+              <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-white animate-bounce"><Trophy size={24} fill="currentColor" /></div>
+              <div><div className="font-black text-lg uppercase tracking-wide">Level Up!</div><div className="text-sm font-medium opacity-95">You reached Rank {levelUpToast.level}</div></div>
            </div>
         </div>
       )}
 
-      {/* Summary Modal */}
       {showSummaryModal && summary && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-md animate-in fade-in duration-300 p-0 md:p-4">
            <div className="absolute inset-0" onClick={() => setShowSummaryModal(false)}></div>
-           <div 
-             className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-[2rem] md:rounded-3xl p-8 shadow-2xl animate-in slide-in-from-bottom duration-300 relative border-t md:border border-white/20 dark:border-white/5 max-h-[85vh] overflow-y-auto no-scrollbar"
-           >
+           <div className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-[2rem] md:rounded-3xl p-8 shadow-2xl animate-in slide-in-from-bottom duration-300 relative border-t md:border border-white/20 dark:border-white/5 max-h-[85vh] overflow-y-auto no-scrollbar">
               <div className="w-12 h-1.5 bg-tg-hint/20 rounded-full mx-auto mb-6 md:hidden"></div>
-              
-              <button 
-                onClick={() => setShowSummaryModal(false)}
-                className="absolute top-6 right-6 p-2 bg-tg-secondaryBg rounded-full text-tg-hint hover:text-tg-text transition-colors hover:rotate-90 duration-300"
-              >
-                <X size={20} />
-              </button>
-              
-              <div className="flex items-center gap-3 mb-6 text-tg-button">
-                 <div className="p-2.5 bg-tg-button/10 rounded-xl">
-                    <Wand2 size={24} />
-                 </div>
-                 <h2 className="text-2xl font-bold font-serif text-tg-text">Deep Dive</h2>
-              </div>
-              
-              <div className="prose prose-lg dark:prose-invert text-tg-text/90 leading-relaxed font-serif first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px] first-letter:text-tg-button">
-                <p>{summary}</p>
-              </div>
-
-              <div className="mt-8 pt-6 border-t border-tg-hint/10">
-                <button 
-                  onClick={() => setShowSummaryModal(false)}
-                  className="w-full py-3.5 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-hint/10 transition-colors"
-                >
-                  Close
-                </button>
-              </div>
+              <button onClick={() => setShowSummaryModal(false)} className="absolute top-6 right-6 p-2 bg-tg-secondaryBg rounded-full text-tg-hint hover:text-tg-text transition-colors hover:rotate-90 duration-300"><X size={20} /></button>
+              <div className="flex items-center gap-3 mb-6 text-tg-button"><div className="p-2.5 bg-tg-button/10 rounded-xl"><Wand2 size={24} /></div><h2 className="text-2xl font-bold font-serif text-tg-text">Deep Dive</h2></div>
+              <div className="prose prose-lg dark:prose-invert text-tg-text/90 leading-relaxed font-serif first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px] first-letter:text-tg-button"><p>{summary}</p></div>
+              <div className="mt-8 pt-6 border-t border-tg-hint/10"><button onClick={() => setShowSummaryModal(false)} className="w-full py-3.5 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-hint/10 transition-colors">Close</button></div>
            </div>
         </div>
       )}
 
-      {/* Profile Modal */}
-      {showProfile && (
-        <ProfileModal 
-          stats={userStats} 
-          onClose={() => setShowProfile(false)} 
-          onShowLeaderboard={() => {
-            setShowProfile(false);
-            setShowLeaderboard(true);
-          }}
-        />
-      )}
-
-      {/* Leaderboard Modal */}
-      {showLeaderboard && (
-        <LeaderboardModal 
-          onClose={() => setShowLeaderboard(false)} 
-          currentUser={user}
-          currentStats={userStats}
-        />
-      )}
-
-      {/* History Modal */}
-      {showHistoryModal && (
-        <HistoryModal 
-           history={history}
-           onClose={() => setShowHistoryModal(false)}
-           onSelect={handleRestoreFromHistory}
-           onClear={handleClearHistory}
-           onDelete={handleDeleteHistory}
-        />
-      )}
+      {showProfile && <ProfileModal stats={userStats} onClose={() => setShowProfile(false)} onShowLeaderboard={() => { setShowProfile(false); setShowLeaderboard(true); }} />}
+      {showLeaderboard && <LeaderboardModal onClose={() => setShowLeaderboard(false)} currentUser={user} currentStats={userStats} />}
+      {showHistoryModal && <HistoryModal history={history} onClose={() => setShowHistoryModal(false)} onSelect={handleRestoreFromHistory} onClear={handleClearHistory} onDelete={handleDeleteHistory} />}
     </div>
   );
 }

@@ -1,11 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 
-// --- CONFIGURATION ---
 const CACHE_VERSION = 'v1';
 const TTL_SUCCESS = 24 * 60 * 60 * 1000;
 const TTL_MOCK = 5 * 60 * 1000;
 
 const cache = new Map<string, { data: string, timestamp: number, isMock: boolean }>();
+
+// --- KEY ROTATION ---
+const getRotatedApiKey = () => {
+    const keys = [
+        process.env.GEMINI_API_KEY,
+        process.env.GEMINI_API_KEY_2,
+        process.env.GEMINI_API_KEY_3,
+        process.env.GEMINI_API_KEY_4,
+        process.env.GEMINI_API_KEY_5
+    ].filter(k => !!k && k.length > 10);
+    if (keys.length === 0) return null;
+    return keys[Math.floor(Math.random() * keys.length)];
+};
 
 const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
     for (let i = 0; i < retries; i++) {
@@ -14,14 +26,9 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
         } catch (e: any) {
             const msg = (e.message || "").toLowerCase();
             const status = e.status;
-            
-            // If it's a Quota error, don't retry, just fail immediately to trigger fallback
-            if (status === 429 || msg.includes('429') || msg.includes('quota')) {
-                throw e;
-            }
+            if (status === 429 || msg.includes('429') || msg.includes('quota')) throw e; // Don't retry quota on same key
 
             const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
-            
             if (isOverloaded && i < retries - 1) {
                 const delay = 1500 * Math.pow(2, i);
                 await new Promise(r => setTimeout(r, delay));
@@ -34,7 +41,7 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
 }
 
 export default async function handler(request: any, response: any) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getRotatedApiKey();
   if (!apiKey) return response.status(500).json({ error: "Server Configuration Error" });
 
   const { word } = request.query;
@@ -43,7 +50,6 @@ export default async function handler(request: any, response: any) {
   const cleanWord = (word as string).trim().toLowerCase();
   const cacheKey = `${CACHE_VERSION}:summary:${cleanWord}`;
 
-  // 1. Check Cache
   const cached = cache.get(cacheKey);
   if (cached) {
       const ttl = cached.isMock ? TTL_MOCK : TTL_SUCCESS;
@@ -68,7 +74,6 @@ export default async function handler(request: any, response: any) {
     const result: any = await Promise.race([generationPromise, timeoutPromise]);
     const text = result.text || "";
 
-    // Success Cache
     if (cache.size > 100) cache.delete(cache.keys().next().value!);
     cache.set(cacheKey, { data: text, timestamp: Date.now(), isMock: false });
 
@@ -76,18 +81,14 @@ export default async function handler(request: any, response: any) {
 
   } catch (error: any) {
     console.error("Summary API Error:", error.message);
-    
-    // 2. Fallback Mock
     const msg = (error.message || "").toLowerCase();
     const isQuota = error.status === 429 || msg.includes('429') || msg.includes('quota');
     
     const mockSummary = isQuota 
-        ? `We've reached our daily AI limit! This is a placeholder summary for "${cleanWord}". Please try generating a deep dive again tomorrow.`
-        : `We are currently experiencing very high demand. The AI summary for "${cleanWord}" is temporarily unavailable. Please check back in a few minutes!`;
+        ? `We've reached our daily AI limit! This is a placeholder summary. Rotating keys will solve this.`
+        : `We are currently experiencing very high demand. Summary temporarily unavailable.`;
     
-    // Short Cache for Mock
     cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });
-
     return response.status(200).json({ summary: mockSummary });
   }
 }

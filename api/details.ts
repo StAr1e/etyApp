@@ -2,39 +2,50 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { connectToDatabase, User } from '../lib/mongodb.js';
 
 // --- CONFIGURATION ---
-const CACHE_VERSION = 'v1'; // Bump this to invalidate all cache
-const TTL_SUCCESS = 24 * 60 * 60 * 1000; // 24 Hours
-const TTL_MOCK = 5 * 60 * 1000; // 5 Minutes (Try real API again soon)
+const CACHE_VERSION = 'v1'; 
+const TTL_SUCCESS = 24 * 60 * 60 * 1000; 
+const TTL_MOCK = 5 * 60 * 1000; 
 const DAILY_LIMIT = 30;
 
-// In-memory cache (Map<"v1:details:word", { data, timestamp, isMock }>)
+// In-memory cache
 const cache = new Map<string, { data: any, timestamp: number, isMock: boolean }>();
 
-// --- MOCK DATA GENERATOR ---
+// --- KEY ROTATION LOGIC ---
+const getRotatedApiKey = () => {
+    const keys = [
+        process.env.GEMINI_API_KEY,
+        process.env.GEMINI_API_KEY_2,
+        process.env.GEMINI_API_KEY_3,
+        process.env.GEMINI_API_KEY_4,
+        process.env.GEMINI_API_KEY_5
+    ].filter(k => !!k && k.length > 10); // Filter out undefined or empty
+
+    if (keys.length === 0) return null;
+    // Pick random key to spread load
+    return keys[Math.floor(Math.random() * keys.length)];
+};
+
+// --- MOCK DATA ---
 const getMockData = (word: string, reason: 'overload' | 'quota' = 'overload') => ({
     word: word,
     phonetic: `/${word.substring(0, 3)}.../`,
     partOfSpeech: "noun (simulated)",
     definition: reason === 'quota' 
-        ? "We hit our daily AI limit, so we generated this placeholder definition to keep the app running. Come back tomorrow for the real deal!" 
+        ? "We hit our daily AI limit. This is a placeholder while we cool down." 
         : "We are currently experiencing high traffic. This definition is temporarily unavailable.",
-    etymology: reason === 'quota'
-        ? "The origins of this word are currently locked behind a paywall of time. (Quota Exceeded)"
-        : "The etymology origins are temporarily obscured by digital fog. Please try again in a few minutes.",
+    etymology: "The etymology origins are temporarily obscured. Please try again in a few minutes.",
     roots: [
         { term: "System", language: "Digital", meaning: reason === 'quota' ? "Limit Reached" : "Overload" },
         { term: "Retry", language: "Action", meaning: "Later" }
     ],
     examples: [`The word "${word}" is popular right now!`],
     synonyms: ["Unavailable", "Pending"],
-    funFact: reason === 'quota' 
-        ? "Even AIs need a nap sometimes. We've reached our safe limit for today." 
-        : "This is a placeholder response because our AI brain is thinking too hard about other words right now!",
-    isMock: true, // Frontend can use this to show a warning if needed
+    funFact: "This is a placeholder response.",
+    isMock: true,
     mockReason: reason
 });
 
-// Helper to retry generation on 503/Overloaded errors
+// Helper to retry generation
 const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
     for (let i = 0; i < retries; i++) {
         try {
@@ -43,15 +54,10 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
             const msg = (e.message || "").toLowerCase();
             const status = e.status;
 
-            const isOverloaded = 
-                status === 503 || 
-                msg.includes('503') || 
-                msg.includes('overloaded') || 
-                msg.includes('unavailable');
+            const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
             
             if (isOverloaded && i < retries - 1) {
-                const delay = 1500 * Math.pow(2, i); // Exponential backoff
-                console.log(`AI Overloaded (Attempt ${i+1}/${retries}). Retrying in ${delay}ms...`);
+                const delay = 1500 * Math.pow(2, i); 
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
@@ -63,9 +69,10 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
 
 export default async function handler(request: any, response: any) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
+    // 1. Get Rotated Key
+    const apiKey = getRotatedApiKey();
     if (!apiKey) {
-      return response.status(500).json({ error: "Configuration Error: GEMINI_API_KEY is missing." });
+      return response.status(500).json({ error: "Configuration Error: No API Keys found." });
     }
 
     const { word, userId } = request.query;
@@ -73,7 +80,6 @@ export default async function handler(request: any, response: any) {
       return response.status(400).json({ error: "Word parameter is required" });
     }
 
-    // 1. Normalize Input
     const cleanWord = (word as string).trim().toLowerCase();
     const cacheKey = `${CACHE_VERSION}:details:${cleanWord}`;
 
@@ -87,6 +93,7 @@ export default async function handler(request: any, response: any) {
     }
 
     // 3. Check Daily Limit (Only if not cached)
+    // Note: With key rotation, we might want to relax this, but keeping it per-user is good hygiene.
     if (userId) {
        try {
          const db = await connectToDatabase();
@@ -97,8 +104,8 @@ export default async function handler(request: any, response: any) {
                  today.setHours(0,0,0,0);
                  const todayCount = user.searchHistory.filter((h: any) => h.timestamp > today.getTime()).length;
                  
-                 if (todayCount >= DAILY_LIMIT) {
-                     // Return Mock Data immediately if user quota hit
+                 // Bump limit to 50 since we have rotated keys now
+                 if (todayCount >= 50) { 
                      const mock = getMockData(cleanWord, 'quota');
                      return response.status(200).json(mock);
                  }
@@ -109,8 +116,9 @@ export default async function handler(request: any, response: any) {
        }
     }
 
-    // 4. Initialize Gemini
+    // 4. Initialize Gemini with Rotated Key
     const ai = new GoogleGenAI({ apiKey });
+    
     const schema: Schema = {
       type: Type.OBJECT,
       properties: {
@@ -152,11 +160,9 @@ export default async function handler(request: any, response: any) {
         let text = result.text;
         if (!text) throw new Error("No text returned");
         
-        // Clean markdown
         text = text.replace(/^```(json)?/, '').replace(/```$/, '');
         const parsedData = JSON.parse(text);
 
-        // Success: Cache for 24 hours
         if (cache.size > 100) cache.delete(cache.keys().next().value!);
         cache.set(cacheKey, { data: parsedData, timestamp: Date.now(), isMock: false });
 
@@ -164,15 +170,14 @@ export default async function handler(request: any, response: any) {
 
     } catch (aiError: any) {
         console.error("AI Gen Failed:", aiError.message);
-        
         const msg = (aiError.message || "").toLowerCase();
-        const isQuota = aiError.status === 429 || msg.includes('429') || msg.includes('quota');
         
-        // 5. Fallback: Return Mock Data
-        // If Quota exceeded (429) OR Overloaded (503), we return mock so the app works.
+        // If one key fails with quota, we return mock, BUT the next user request will pick a DIFFERENT key
+        // from the pool, effectively bypassing the block for the app as a whole.
+        const isQuota = aiError.status === 429 || msg.includes('429') || msg.includes('quota');
         const mock = getMockData(cleanWord, isQuota ? 'quota' : 'overload');
         
-        // Cache Mock
+        // Shorter cache for failures
         cache.set(cacheKey, { data: mock, timestamp: Date.now(), isMock: true });
         
         return response.status(200).json(mock);
@@ -180,7 +185,6 @@ export default async function handler(request: any, response: any) {
 
   } catch (error: any) {
     console.error("Critical API Error:", error);
-    // Even on critical error, try to return mock if we have the word
     if (request.query.word) {
         return response.status(200).json(getMockData(request.query.word as string));
     }
