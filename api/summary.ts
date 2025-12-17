@@ -1,12 +1,11 @@
 import { GoogleGenAI } from "@google/genai";
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v3';
 const TTL_SUCCESS = 24 * 60 * 60 * 1000;
 const TTL_MOCK = 5 * 60 * 1000;
 
 const cache = new Map<string, { data: string, timestamp: number, isMock: boolean }>();
 
-// --- KEY ROTATION ---
 const getRotatedApiKey = () => {
     const keys = [
         process.env.GEMINI_API_KEY,
@@ -27,10 +26,7 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
             const msg = (e.message || "").toLowerCase();
             const status = e.status;
             if (status === 429 || msg.includes('429') || msg.includes('quota')) throw e; 
-
-            // Handle 503 Overloaded with backoff
-            const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
-            if (isOverloaded && i < retries - 1) {
+            if ((status === 503 || msg.includes('503') || msg.includes('overloaded')) && i < retries - 1) {
                 const delay = 800 * Math.pow(2, i);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
@@ -52,11 +48,8 @@ export default async function handler(request: any, response: any) {
   const cacheKey = `${CACHE_VERSION}:summary:${cleanWord}`;
 
   const cached = cache.get(cacheKey);
-  if (cached) {
-      const ttl = cached.isMock ? TTL_MOCK : TTL_SUCCESS;
-      if (Date.now() - cached.timestamp < ttl) {
-          return response.status(200).json({ summary: cached.data });
-      }
+  if (cached && Date.now() - cached.timestamp < (cached.isMock ? TTL_MOCK : TTL_SUCCESS)) {
+    return response.status(200).json({ summary: cached.data });
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -68,42 +61,41 @@ export default async function handler(request: any, response: any) {
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-3-flash-preview',
-      contents: `Provide an informative summary for the word "${cleanWord}".
+      contents: `Provide a clear, factual dictionary-style summary for the term "${cleanWord}".
       
-      STRICT RULES:
-      1. START with a clear definition: "[Word] is [definition]..."
-      2. LENGTH: One single paragraph, maximum 5 complete sentences.
-      3. TONE: Encyclopedia-style, factual and direct.
-      4. COMPLETION: Every sentence must be finished. Do not stop mid-sentence.
-      5. EXAMPLE for 'computer': "A computer is an electronic device that processes data and performs tasks according to instructions. It consists of hardware and software, can store and retrieve information, and is used in work, education, communication, and entertainment."`,
+      STRICT CONSTRAINTS:
+      1. FORMAT: Start immediately with the definition. For example: "A computer is..."
+      2. STYLE: Informative and factual (Encyclopedia style).
+      3. LENGTH: Exactly one paragraph (3-5 sentences).
+      4. COMPLETENESS: You MUST finish every sentence. Never stop mid-sentence.
+      
+      USER EXAMPLE:
+      "A computer is an electronic device that processes data and performs tasks according to instructions. It consists of hardware and software, can store and retrieve information, and is used in work, education, communication, and entertainment."`,
       config: { 
-          maxOutputTokens: 400, 
-          temperature: 0.3 
+          maxOutputTokens: 300,
+          temperature: 0.4
       }
     });
 
     const result: any = await Promise.race([generationPromise, timeoutPromise]);
-    const text = (result.text || "").trim();
+    let text = (result.text || "").trim();
 
-    // Verification check for unfinished sentences
-    const cleanText = text.replace(/\s+/g, ' ');
-    
-    if (cache.size > 100) cache.delete(cache.keys().next().value!);
-    cache.set(cacheKey, { data: cleanText, timestamp: Date.now(), isMock: false });
+    // Ensure the text isn't cut off
+    if (!text.match(/[.!?]$/)) {
+        const lastPunctuation = Math.max(text.lastIndexOf('.'), text.lastIndexOf('!'), text.lastIndexOf('?'));
+        if (lastPunctuation !== -1) {
+            text = text.substring(0, lastPunctuation + 1);
+        }
+    }
 
-    return response.status(200).json({ summary: cleanText });
+    if (cache.size > 200) cache.delete(cache.keys().next().value!);
+    cache.set(cacheKey, { data: text, timestamp: Date.now(), isMock: false });
+
+    return response.status(200).json({ summary: text });
 
   } catch (error: any) {
     console.error("Summary API Error:", error.message);
-    const msg = (error.message || "").toLowerCase();
-    
-    let mockSummary = `The AI is currently receiving high traffic. Please try generating the deep dive again in a few seconds.`;
-    
-    if (msg.includes("timeout")) {
-        mockSummary = `Our archives for "${cleanWord}" are vast, but the system timed out. Please try again.`;
-    }
-    
-    cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });
+    const mockSummary = `The dictionary entry for "${cleanWord}" is currently being updated. Please try the Deep Dive again in a few seconds.`;
     return response.status(200).json({ summary: mockSummary });
   }
 }

@@ -104,7 +104,7 @@ export default function App() {
     setShowSummaryModal(true);
 
     // If we already have it to avoid redundant AI calls
-    if (summary && summary.length > 50 && !summary.includes("timeout")) {
+    if (summary && summary.length > 50 && !summary.includes("updated")) {
       return;
     }
 
@@ -443,7 +443,7 @@ export default function App() {
               {isSummaryLoading ? (
                  <div className="flex flex-col items-center justify-center py-12 space-y-4">
                     <Loader2 size={48} className="animate-spin text-tg-button" />
-                    <p className="text-lg font-serif italic text-tg-text/70 animate-pulse">Writing your story...</p>
+                    <p className="text-lg font-serif italic text-tg-text/70 animate-pulse">Writing summary...</p>
                  </div>
               ) : (
                 <>
