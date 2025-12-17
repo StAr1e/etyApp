@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordData, TelegramWebApp } from '../types';
-import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
+import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck, Download, FastForward, Loader2, RefreshCw, CloudOff } from 'lucide-react';
 import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
@@ -46,7 +46,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
   // Audio State
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
-  const [audioError, setAudioError] = useState<boolean>(false);
   const [playbackRate, setPlaybackRate] = useState(1.0);
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -65,6 +64,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     setImageError(null);
     setIsImageLoading(true);
     try {
+      // Pass definition instead of etymology for better visual meaning
       const b64 = await fetchWordImage(data.word, data.definition);
       if (b64) {
         const fullImage = `data:image/jpeg;base64,${b64}`;
@@ -74,28 +74,31 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         setImageError("generation_failed");
       }
     } catch (e: any) {
-      setImageError("generation_failed");
+      console.error("Image load failed", e);
+      if (e.message === "QUOTA_EXCEEDED") {
+          setImageError("quota_exceeded");
+      } else {
+          setImageError("generation_failed");
+      }
     } finally {
       setIsImageLoading(false);
     }
   }, [data.word, data.definition, onImageLoaded]);
 
   useEffect(() => {
+    // If we have an initial image from history, use it and don't fetch
     if (initialImage) {
         setAiImage(initialImage);
         setIsImageLoading(false);
     } else {
+        // Otherwise fetch new
         loadImage();
     }
     
-    // Cleanup previous audio blob on word change
-    if (audioBlobUrl) {
-      URL.revokeObjectURL(audioBlobUrl);
-      setAudioBlobUrl(null);
-    }
+    // Reset Audio when word changes
+    setAudioBlobUrl(null);
     setIsPlaying(false);
-    setAudioError(false);
-  }, [data.word]);
+  }, [data.word, initialImage, loadImage]); // Depend on data.word to reset when word changes
 
   // --- AUDIO LOGIC ---
 
@@ -107,120 +110,123 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     }
 
     if (audioBlobUrl) {
+      // If we have audio, just play it
+      // Ensure speed is set
       if(audioRef.current) {
          audioRef.current.playbackRate = playbackRate;
-         audioRef.current.play().catch((err) => {
-            console.error("Audio Playback Error:", err);
-            setAudioError(true);
-         });
+         audioRef.current.play();
          setIsPlaying(true);
       }
       return;
     }
 
+    // First time load: Fetch Full Text
     setIsAudioLoading(true);
-    setAudioError(false);
     try {
-      // Narrate the complete passage clearly
-      const fullText = `${data.word}. Definition: ${data.definition}. Origin history: ${data.etymology}. Fun fact: ${data.funFact}`;
+      const fullText = `
+        ${data.word}. 
+        Definition: ${data.definition}. 
+        Etymology: ${data.etymology}. 
+        Fun fact: ${data.funFact}
+      `;
       
       const audioBuffer = await fetchPronunciation(fullText);
       
-      if (audioBuffer && audioBuffer.byteLength > 0) {
+      if (audioBuffer) {
         const SAMPLE_RATE = 24000;
-        
-        // Ensure byte length is even for Int16Array
-        const evenByteLength = audioBuffer.byteLength - (audioBuffer.byteLength % 2);
-        const safeBuffer = audioBuffer.slice(0, evenByteLength);
-        const pcmData = new Int16Array(safeBuffer);
-        
+        const pcmData = new Int16Array(audioBuffer);
         const wavBlob = writeWavHeader(pcmData, SAMPLE_RATE);
         const url = URL.createObjectURL(wavBlob);
         
         setAudioBlobUrl(url);
         
-        // Short delay to ensure browser processed the Blob URL
+        // Slight delay to ensure element updates
         setTimeout(() => {
           if (audioRef.current) {
-            audioRef.current.load(); // Forces reload of the source
             audioRef.current.playbackRate = playbackRate;
-            audioRef.current.play()
-              .then(() => setIsPlaying(true))
-              .catch((err) => {
-                console.error("Playback failed after load", err);
-                setAudioError(true);
-              });
+            audioRef.current.play();
+            setIsPlaying(true);
           }
         }, 100);
-      } else {
-        setAudioError(true);
       }
     } catch (e) {
-      console.error("Audio generation exception", e);
-      setAudioError(true);
+      console.error("Audio generation failed", e);
     } finally {
       setIsAudioLoading(false);
     }
   };
 
   const cycleSpeed = () => {
-    const rates = [1.0, 1.25, 1.5, 2.0];
+    const rates = [1.0, 1.5, 2.0];
     const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
     setPlaybackRate(next);
     if (audioRef.current) audioRef.current.playbackRate = next;
   };
 
+  // --- ROBUST DOWNLOAD/SHARE LOGIC (Mobile Friendly) ---
+  
   const handleDownloadAudio = async () => {
-    // Generate if not exists
-    if (!audioBlobUrl) {
-       await handleTogglePlay();
-       // Stop playback immediately if user only wanted download
-       audioRef.current?.pause();
-       setIsPlaying(false);
-    }
-
     if (!audioBlobUrl) return;
 
     try {
-      const filename = `ety_ai_${data.word}.wav`;
-      
-      // Fallback: Create direct link and trigger click
-      const a = document.createElement('a');
-      a.href = audioBlobUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      // 1. Convert Object URL back to Blob
+      const response = await fetch(audioBlobUrl);
+      const blob = await response.blob();
+      const file = new File([blob], `ety_ai_${data.word}.wav`, { type: 'audio/wav' });
 
-      // Telegram-specific: Try native sharing of file
-      if (window.Telegram?.WebApp && navigator.share) {
-         const response = await fetch(audioBlobUrl);
-         const blob = await response.blob();
-         const file = new File([blob], filename, { type: 'audio/wav' });
-         if (navigator.canShare && navigator.canShare({ files: [file] })) {
-           await navigator.share({
-             files: [file],
-             title: `Ety.ai Narrative: ${data.word}`,
-           });
-         }
+      // 2. Try Native Share (Best for Mobile Telegram)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Ety.ai Audio: ${data.word}`,
+        });
+        return;
       }
     } catch (e) {
-      console.warn("Download/Share failed", e);
+      console.warn("Share failed, falling back to download link", e);
     }
+
+    // 3. Fallback: Classic Link Download (Desktop)
+    const a = document.createElement('a');
+    a.href = audioBlobUrl;
+    a.download = `ety_ai_${data.word}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   const handleDownloadImage = async () => {
     if (!aiImage) return;
+
     try {
-      const a = document.createElement('a');
-      a.href = aiImage;
-      a.download = `ety_ai_${data.word}.jpg`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } catch (e) {}
+      // 1. Convert Data URI to Blob
+      const response = await fetch(aiImage);
+      const blob = await response.blob();
+      const file = new File([blob], `ety_ai_${data.word}.jpg`, { type: 'image/jpeg' });
+
+      // 2. Try Native Share (Best for Mobile Telegram - Saves to Photos/Files)
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `Ety.ai Image: ${data.word}`,
+          text: `Visual representation of ${data.word}`
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("Share failed, falling back to download link", e);
+    }
+
+    // 3. Fallback: Classic Link Download (Desktop)
+    const a = document.createElement('a');
+    a.href = aiImage;
+    a.download = `ety_ai_${data.word}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
+  // --- SHARE & COPY LOGIC ---
   const handleShare = () => {
     if (onShare) onShare();
     if (window.Telegram?.WebApp) {
@@ -247,6 +253,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
       {/* 1. Hero Card */}
       <div className="bg-tg-bg rounded-3xl p-6 md:p-8 shadow-soft border border-tg-hint/10 relative overflow-hidden group">
         
+        {/* Top Controls */}
         <div className="relative z-10 flex justify-between items-start mb-6">
            <span className="px-3 py-1 bg-tg-secondaryBg text-tg-hint text-xs font-bold rounded-full uppercase tracking-wider border border-tg-hint/10">
              {data.partOfSpeech}
@@ -268,6 +275,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         </div>
 
         <div className="relative z-10 mb-6">
+           {/* Word Title */}
            <h1 className="text-5xl md:text-6xl font-serif font-black text-tg-text tracking-tight capitalize bg-clip-text text-transparent bg-gradient-to-br from-tg-text to-tg-text/70 mb-2">
               {data.word}
            </h1>
@@ -289,8 +297,13 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
                  className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-105" 
                />
                <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 group-hover/img:opacity-100 transition-opacity"></div>
+               
+               {/* DOWNLOAD BUTTON */}
                <button 
-                 onClick={(e) => { e.stopPropagation(); handleDownloadImage(); }}
+                 onClick={(e) => {
+                   e.stopPropagation();
+                   handleDownloadImage();
+                 }}
                  className="absolute bottom-4 right-4 p-2.5 bg-black/40 hover:bg-black/60 backdrop-blur-md text-white rounded-full transition-all opacity-0 group-hover/img:opacity-100 transform translate-y-2 group-hover/img:translate-y-0 shadow-lg"
                  title="Save Image"
                >
@@ -299,111 +312,151 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
              </div>
            ) : (
              <div className="w-full h-full flex flex-col items-center justify-center text-tg-hint/50 p-6 text-center">
-                <RefreshCw size={32} className="mb-2 cursor-pointer hover:text-tg-button transition-colors" onClick={loadImage} />
-                <span className="text-xs font-bold">Tap to retry image</span>
+                {imageError === 'quota_exceeded' ? (
+                    <>
+                       <CloudOff size={32} className="mb-2" />
+                       <span className="text-xs font-bold">Image Quota Limit</span>
+                    </>
+                ) : (
+                    <>
+                       <RefreshCw size={32} className="mb-2 cursor-pointer hover:text-tg-button transition-colors" onClick={loadImage} />
+                       <span className="text-xs font-bold">Tap to retry image</span>
+                    </>
+                )}
              </div>
            )}
         </div>
 
-        {/* Narrator Player */}
-        <div className={`relative z-10 bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border transition-colors ${audioError ? 'border-red-500/30' : 'border-tg-hint/5'}`}>
+        {/* Audio Player */}
+        <div className="relative z-10 bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border border-tg-hint/5">
            <button 
              onClick={handleTogglePlay}
              disabled={isAudioLoading}
-             className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 disabled:opacity-50 ${audioError ? 'bg-red-500 text-white' : 'bg-tg-button text-white shadow-tg-button/30 hover:scale-105'}`}
-             title="Listen to full passage"
+             className="w-12 h-12 rounded-full bg-tg-button text-white flex items-center justify-center shadow-lg shadow-tg-button/30 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
            >
-             {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : audioError ? <AlertCircle size={20} /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+             {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
            </button>
            
            <div className="flex-1">
-              <div className={`text-xs font-bold uppercase tracking-wider mb-1 ${audioError ? 'text-red-500' : 'text-tg-hint'}`}>
-                {audioError ? 'Playback Error' : 'Narrator'}
-              </div>
+              <div className="text-xs font-bold text-tg-hint uppercase tracking-wider mb-1">Pronunciation</div>
               <div className="h-1 bg-tg-hint/10 rounded-full overflow-hidden">
-                 <div className={`h-full rounded-full transition-all ${audioError ? 'bg-red-500/50 w-full' : isPlaying ? 'bg-tg-button/50 animate-[pulse_1s_ease-in-out_infinite] w-full' : 'w-0'}`}></div>
+                 <div className={`h-full bg-tg-button/50 rounded-full ${isPlaying ? 'animate-[pulse_1s_ease-in-out_infinite] w-full' : 'w-0'}`}></div>
               </div>
            </div>
 
-           <div className="flex items-center gap-1">
-             <button onClick={cycleSpeed} className="p-2 text-tg-hint hover:text-tg-text text-xs font-bold transition-colors w-12 text-center">
+           <div className="flex gap-1">
+             <button onClick={cycleSpeed} className="p-2 text-tg-hint hover:text-tg-text text-xs font-bold transition-colors w-10 text-center">
                {playbackRate}x
              </button>
-             <button 
-                onClick={handleDownloadAudio} 
-                className={`p-2 transition-colors ${audioBlobUrl ? 'text-tg-button' : 'text-tg-hint'}`}
-                title="Download Narrative"
-              >
-                <Download size={18} />
-             </button>
+             {audioBlobUrl && (
+                <button 
+                  onClick={handleDownloadAudio} 
+                  className="p-2 text-tg-hint hover:text-tg-text transition-colors"
+                  title="Save Audio"
+                >
+                  <Download size={18} />
+                </button>
+             )}
            </div>
         </div>
 
+        {/* Hidden Audio Element */}
         <audio 
           ref={audioRef} 
           src={audioBlobUrl || undefined}
           onEnded={() => setIsPlaying(false)}
-          onError={() => { 
-            setIsPlaying(false); 
-            setIsAudioLoading(false); 
-            setAudioError(true); 
-          }}
+          onError={() => { setIsPlaying(false); setIsAudioLoading(false); }}
         />
         
+        {/* Background Decor */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-tg-button/5 to-purple-500/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
       </div>
 
       {/* 2. Definition & Etymology */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        {/* Definition */}
         <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-sm relative overflow-hidden">
            <div className="flex items-center gap-3 mb-4 text-tg-button">
-              <div className="p-2 bg-tg-button/10 rounded-lg"><BookOpenCheck size={20} /></div>
+              <div className="p-2 bg-tg-button/10 rounded-lg">
+                <BookOpenCheck size={20} />
+              </div>
               <h2 className="font-bold text-lg">Meaning</h2>
            </div>
-           <p className="text-lg leading-relaxed text-tg-text/90 font-serif">{data.definition}</p>
+           <p className="text-lg leading-relaxed text-tg-text/90 font-serif">
+             {data.definition}
+           </p>
         </div>
+
+        {/* Etymology */}
         <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-sm relative overflow-hidden">
            <div className="flex items-center gap-3 mb-4 text-purple-600">
-              <div className="p-2 bg-purple-500/10 rounded-lg"><GitFork size={20} /></div>
+              <div className="p-2 bg-purple-500/10 rounded-lg">
+                <GitFork size={20} />
+              </div>
               <h2 className="font-bold text-lg">Origin Story</h2>
            </div>
-           <p className="text-base leading-relaxed text-tg-text/80">{data.etymology}</p>
+           <p className="text-base leading-relaxed text-tg-text/80">
+             {data.etymology}
+           </p>
         </div>
       </div>
 
+      {/* 3. Roots Trace */}
       <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10 shadow-sm">
          <div className="flex items-center gap-3 mb-6 text-amber-600">
-            <div className="p-2 bg-amber-500/10 rounded-lg"><Users size={20} /></div>
+            <div className="p-2 bg-amber-500/10 rounded-lg">
+               <Users size={20} />
+            </div>
             <h2 className="font-bold text-lg">Ancestry</h2>
          </div>
+         
          <div className="relative">
+            {/* Connecting Line */}
             <div className="absolute top-8 left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-tg-hint/20 to-transparent hidden md:block"></div>
+            
             <div className="flex flex-col md:flex-row justify-between gap-6 md:gap-4 relative z-10">
                {data.roots.map((root, i) => (
                  <div key={i} className="flex-1 bg-tg-secondaryBg/50 rounded-2xl p-4 border border-tg-hint/5 flex flex-col items-center text-center hover:bg-tg-secondaryBg transition-colors group">
                     <span className="text-[10px] font-bold uppercase text-tg-hint mb-1 tracking-widest">{root.language}</span>
                     <span className="text-xl font-bold text-tg-text mb-1 group-hover:text-tg-button transition-colors font-serif">{root.term}</span>
                     <span className="text-sm text-tg-hint italic">"{root.meaning}"</span>
-                    {i < data.roots.length - 1 && <div className="md:hidden mt-4 text-tg-hint/30">↓</div>}
+                    
+                    {/* Mobile Down Arrow */}
+                    {i < data.roots.length - 1 && (
+                      <div className="md:hidden mt-4 text-tg-hint/30">↓</div>
+                    )}
                  </div>
                ))}
             </div>
          </div>
       </div>
 
+      {/* 4. Fun Fact & Synonyms */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+         {/* Fun Fact */}
          <div className="md:col-span-2 bg-gradient-to-br from-yellow-500/5 to-orange-500/5 rounded-3xl p-6 border border-yellow-500/10 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-10"><Lightbulb size={64} className="text-yellow-500" /></div>
+            <div className="absolute top-0 right-0 p-4 opacity-10">
+               <Lightbulb size={64} className="text-yellow-500" />
+            </div>
             <div className="relative z-10">
-               <div className="flex items-center gap-2 mb-3 text-yellow-600 font-bold uppercase text-xs tracking-wider"><Lightbulb size={16} /> Did you know?</div>
-               <p className="text-tg-text font-medium italic">"{data.funFact}"</p>
+               <div className="flex items-center gap-2 mb-3 text-yellow-600 font-bold uppercase text-xs tracking-wider">
+                  <Lightbulb size={16} /> Did you know?
+               </div>
+               <p className="text-tg-text font-medium italic">
+                 "{data.funFact}"
+               </p>
             </div>
          </div>
+
+         {/* Synonyms */}
          <div className="bg-tg-bg rounded-3xl p-6 border border-tg-hint/10">
             <div className="font-bold text-tg-hint text-xs uppercase tracking-wider mb-4">Synonyms</div>
             <div className="flex flex-wrap gap-2">
                {data.synonyms.slice(0, 5).map(syn => (
-                 <span key={syn} className="px-3 py-1.5 bg-tg-secondaryBg rounded-lg text-sm text-tg-text font-medium border border-tg-hint/5">{syn}</span>
+                 <span key={syn} className="px-3 py-1.5 bg-tg-secondaryBg rounded-lg text-sm text-tg-text font-medium border border-tg-hint/5">
+                   {syn}
+                 </span>
                ))}
             </div>
          </div>

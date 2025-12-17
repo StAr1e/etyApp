@@ -1,19 +1,7 @@
 import { GoogleGenAI, Modality } from "@google/genai";
 
-const getRotatedApiKey = () => {
-    const keys = [
-        process.env.GEMINI_API_KEY,
-        process.env.GEMINI_API_KEY_2,
-        process.env.GEMINI_API_KEY_3,
-        process.env.GEMINI_API_KEY_4,
-        process.env.GEMINI_API_KEY_5
-    ].filter(k => !!k && k.length > 10);
-    if (keys.length === 0) return null;
-    return keys[Math.floor(Math.random() * keys.length)];
-};
-
 export default async function handler(request: any, response: any) {
-  const apiKey = getRotatedApiKey();
+  const apiKey = process.env.GEMINI_API_KEY;
   
   if (!apiKey) {
     return response.status(500).json({ error: "Server Configuration Error: API Key missing" });
@@ -32,7 +20,6 @@ export default async function handler(request: any, response: any) {
       model: 'gemini-2.5-flash-preview-tts',
       contents: [{ parts: [{ text: text as string }] }],
       config: {
-        systemInstruction: "You are a warm and knowledgeable professional narrator for Ety.ai. Speak at a clear, comfortable pace. Use pauses between different sections of information (definition, origin, and facts) to ensure the listener can follow easily.",
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
@@ -51,10 +38,13 @@ export default async function handler(request: any, response: any) {
     }
 
   } catch (error: any) {
+    console.error("API Error:", error);
+    
     const msg = error.message?.toLowerCase() || "";
-    if (error.status === 429 || msg.includes('429') || msg.includes('quota')) {
+    if (error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
        return response.status(429).json({ error: "Daily AI usage limit reached." });
     }
+
     return response.status(500).json({ error: error.message || "Failed to generate audio" });
   }
 }
