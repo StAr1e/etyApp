@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordData, TelegramWebApp } from '../types';
-import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, Volume2, BookOpenCheck, Download, FastForward, Loader2, RefreshCw, CloudOff, AlertCircle } from 'lucide-react';
+import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
 import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
@@ -88,8 +88,11 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         loadImage();
     }
     
-    // Reset Audio when word changes
-    setAudioBlobUrl(null);
+    // Cleanup audio on word change
+    if (audioBlobUrl) {
+      URL.revokeObjectURL(audioBlobUrl);
+      setAudioBlobUrl(null);
+    }
     setIsPlaying(false);
     setAudioError(false);
   }, [data.word, initialImage, loadImage]);
@@ -116,25 +119,32 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     setAudioError(false);
     try {
       // Narrate the complete passage: Word, definition, etymology, and fact.
-      const fullText = `${data.word}. Definition: ${data.definition}. Origin: ${data.etymology}. Surprising fact: ${data.funFact}`;
+      const fullText = `${data.word}. ${data.definition}. ${data.etymology}. Surprising fact: ${data.funFact}`;
       
       const audioBuffer = await fetchPronunciation(fullText);
       
       if (audioBuffer) {
         const SAMPLE_RATE = 24000;
-        const pcmData = new Int16Array(audioBuffer);
+        // Fix for alignment: use slice to ensure the buffer length is correct for Int16Array
+        const safeBuffer = audioBuffer.slice(0, audioBuffer.byteLength - (audioBuffer.byteLength % 2));
+        const pcmData = new Int16Array(safeBuffer);
         const wavBlob = writeWavHeader(pcmData, SAMPLE_RATE);
         const url = URL.createObjectURL(wavBlob);
         
         setAudioBlobUrl(url);
         
+        // Use a short delay to ensure browser handles the Blob URL
         setTimeout(() => {
           if (audioRef.current) {
             audioRef.current.playbackRate = playbackRate;
-            audioRef.current.play().catch(() => setAudioError(true));
-            setIsPlaying(true);
+            audioRef.current.play().then(() => {
+              setIsPlaying(true);
+            }).catch((err) => {
+              console.error("Playback failed", err);
+              setAudioError(true);
+            });
           }
-        }, 150);
+        }, 100);
       } else {
         setAudioError(true);
       }
@@ -154,10 +164,10 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
   };
 
   const handleDownloadAudio = async () => {
-    // If not generated, generate first
+    // Generate if not exists
     if (!audioBlobUrl) {
        await handleTogglePlay();
-       // Pause immediately if it was just for download
+       // Stop playback immediately if user only wanted download
        audioRef.current?.pause();
        setIsPlaying(false);
     }
@@ -167,49 +177,41 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     try {
       const response = await fetch(audioBlobUrl);
       const blob = await response.blob();
-      const file = new File([blob], `ety_ai_${data.word}.wav`, { type: 'audio/wav' });
+      const filename = `ety_ai_${data.word}.wav`;
+      
+      // Fallback: Create direct link and trigger click
+      const a = document.createElement('a');
+      a.href = audioBlobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
 
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `Ety.ai Narrator: ${data.word}`,
-        });
-        return;
+      // Telegram-specific: Try native sharing of file
+      if (window.Telegram?.WebApp && navigator.share) {
+         const file = new File([blob], filename, { type: 'audio/wav' });
+         if (navigator.canShare && navigator.canShare({ files: [file] })) {
+           await navigator.share({
+             files: [file],
+             title: `Ety.ai Narrator: ${data.word}`,
+           });
+         }
       }
     } catch (e) {
-      console.warn("Native share failed, fallback to classic download", e);
+      console.warn("Download/Share failed", e);
     }
-
-    const a = document.createElement('a');
-    a.href = audioBlobUrl;
-    a.download = `ety_ai_${data.word}.wav`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   };
 
   const handleDownloadImage = async () => {
     if (!aiImage) return;
     try {
-      const response = await fetch(aiImage);
-      const blob = await response.blob();
-      const file = new File([blob], `ety_ai_${data.word}.jpg`, { type: 'image/jpeg' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `Ety.ai Insight: ${data.word}`,
-          text: `The history of ${data.word}`
-        });
-        return;
-      }
+      const a = document.createElement('a');
+      a.href = aiImage;
+      a.download = `ety_ai_${data.word}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (e) {}
-
-    const a = document.createElement('a');
-    a.href = aiImage;
-    a.download = `ety_ai_${data.word}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
   };
 
   const handleShare = () => {

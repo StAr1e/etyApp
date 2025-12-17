@@ -68,14 +68,15 @@ export default async function handler(request: any, response: any) {
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-3-flash-preview',
-      contents: `Write a concise etymology story of "${cleanWord}". 
-      RULES:
-      1. Length: Maximum 5 sentences or one single paragraph.
-      2. Content: Focus on the most surprising origins and evolution.
-      3. Tone: Engaging and informative.`,
+      contents: `Generate a concise summary for the term "${cleanWord}".
+      
+      STRICT CONSTRAINTS:
+      1. Length: Exactly one paragraph, maximum 5 sentences.
+      2. Style: Informative, factual, and direct (similar to an encyclopedia or dictionary).
+      3. Example: "A computer is an electronic device that processes data and performs tasks according to instructions. It consists of hardware and software, can store and retrieve information, and is used in work, education, and entertainment."`,
       config: { 
           maxOutputTokens: 250, 
-          temperature: 0.7 
+          temperature: 0.5 
       }
     });
 
