@@ -68,9 +68,13 @@ export default async function handler(request: any, response: any) {
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-3-flash-preview',
-      contents: `Etymology summary of "${cleanWord}". Concise, engaging story. Max 120 words. Focus on origins and evolution.`,
+      contents: `Write a concise etymology story of "${cleanWord}". 
+      RULES:
+      1. Length: Maximum 5 sentences or one single paragraph.
+      2. Content: Focus on the most surprising origins and evolution.
+      3. Tone: Engaging and informative.`,
       config: { 
-          maxOutputTokens: 300, 
+          maxOutputTokens: 250, 
           temperature: 0.7 
       }
     });

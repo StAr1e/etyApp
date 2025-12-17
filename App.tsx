@@ -356,14 +356,12 @@ export default function App() {
         </div>
 
         <header className={`flex flex-col items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${view === 'result' ? 'h-0 overflow-hidden opacity-0 scale-95' : 'flex-1 max-h-[40vh] opacity-100 scale-100'}`}>
-          <div className="text-center group">
-             <div className="relative inline-block mb-4">
-               <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-10 rounded-full group-hover:opacity-20 transition-opacity"></div>
-               <h1 className="relative z-10 font-serif text-5xl font-black text-tg-text tracking-tighter italic">
-                 Ety<span className="text-tg-button">.</span>ai
-               </h1>
+          <div className="text-center">
+             <div className="relative inline-block">
+               <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-20 rounded-full"></div>
+               <img src="logo.png" alt="Ety.ai Logo" className="w-24 h-24 relative z-10 mx-auto mb-4 object-contain animate-float" />
              </div>
-             <p className="text-tg-hint font-medium text-base">Uncover the stories behind words</p>
+             <p className="text-tg-hint font-medium text-base mt-2">Uncover the stories behind words</p>
           </div>
         </header>
 
