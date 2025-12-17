@@ -27,7 +27,7 @@ export default function App() {
   
   // Summary State
   const [summary, setSummary] = useState<string | null>(null);
-  const [isSummaryLoading, setIsSummaryLoading] = useState(false); // Track summary specific loading
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   
   const hasInitialized = useRef(false);
@@ -64,16 +64,12 @@ export default function App() {
       setUser(window.Telegram.WebApp.initDataUnsafe.user);
     } else {
       setShowWebLoginMessage(true);
-      if (import.meta.env.DEV && !showWebLoginMessage) {
-          console.log("DEV Mode: Click login again to mock user if needed.");
-      }
     }
   };
 
   const handleBack = useCallback(() => {
      if (showSummaryModal) {
        setShowSummaryModal(false);
-       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.show();
        return;
      }
 
@@ -104,13 +100,16 @@ export default function App() {
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
     
-    // OPEN MODAL IMMEDIATELY IN LOADING STATE
+    // Check if we already have it to avoid redundant AI calls
+    if (summary && summary.length > 50 && !summary.includes("timeout")) {
+      setShowSummaryModal(true);
+      return;
+    }
+
     setIsSummaryLoading(true);
-    setSummary(null);
     setShowSummaryModal(true); 
     
     if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.MainButton.showProgress(false);
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
 
@@ -121,43 +120,38 @@ export default function App() {
       if(user) {
           handleGamificationAction('SUMMARY', { word: wordData.word, summary: text }); 
       }
-      const updatedHistory = history.map(item => {
-        if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
-           return { ...item, summary: text };
-        }
-        return item;
-      });
-      setHistory(updatedHistory);
-      localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
       
-      if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hide();
+      setHistory(prev => {
+        const newHistory = prev.map(item => 
+          item.word.toLowerCase() === wordData.word.toLowerCase() ? { ...item, summary: text } : item
+        );
+        localStorage.setItem('ety_history', JSON.stringify(newHistory));
+        return newHistory;
+      });
 
     } catch (e) {
       console.error(e);
-      setSummary("Failed to generate summary. Please try again.");
+      setSummary("Our scribe is currently busy. Please try generating the deep dive again in a few moments.");
     } finally {
       setIsSummaryLoading(false);
-      if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
-  }, [wordData, user, history]); 
+  }, [wordData, user, summary]); 
 
   const handleImageLoaded = useCallback((base64Image: string) => {
     if (!wordData) return;
-    const currentItem = history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase());
-    if (currentItem && currentItem.image === base64Image) return;
+    
+    setHistory(prev => {
+      const newHistory = prev.map(item => 
+        item.word.toLowerCase() === wordData.word.toLowerCase() ? { ...item, image: base64Image } : item
+      );
+      localStorage.setItem('ety_history', JSON.stringify(newHistory));
+      return newHistory;
+    });
 
     if(user) {
         handleGamificationAction('IMAGE', { word: wordData.word, image: base64Image });
     }
-    const updatedHistory = history.map(item => {
-        if (item.word.toLowerCase() === wordData.word.toLowerCase()) {
-           return { ...item, image: base64Image };
-        }
-        return item;
-    });
-    setHistory(updatedHistory);
-    localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
-  }, [wordData, user, history]);
+  }, [wordData, user]);
 
   const handleSearch = async (term: string) => {
     if (!term) return;
@@ -173,7 +167,6 @@ export default function App() {
       let data: WordData;
 
       if (localCached && localCached.data) {
-          console.log("Loading from Local History Cache");
           data = localCached.data;
           if(localCached.summary) setSummary(localCached.summary);
       } else {
@@ -191,12 +184,11 @@ export default function App() {
             timestamp: Date.now(),
             data: data 
          };
-         const newHistory = [
-            newItem,
-            ...history.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())
-         ].slice(0, 50); 
-         setHistory(newHistory);
-         localStorage.setItem('ety_history', JSON.stringify(newHistory));
+         setHistory(prev => {
+            const newHistory = [newItem, ...prev.filter(h => h.word.toLowerCase() !== data.word.toLowerCase())].slice(0, 50);
+            localStorage.setItem('ety_history', JSON.stringify(newHistory));
+            return newHistory;
+         });
       }
 
     } catch (err: any) {
@@ -222,9 +214,11 @@ export default function App() {
   };
 
   const handleDeleteHistory = (timestamp: number) => {
-     const newHistory = history.filter(h => h.timestamp !== timestamp);
-     setHistory(newHistory);
-     localStorage.setItem('ety_history', JSON.stringify(newHistory));
+     setHistory(prev => {
+       const newHistory = prev.filter(h => h.timestamp !== timestamp);
+       localStorage.setItem('ety_history', JSON.stringify(newHistory));
+       return newHistory;
+     });
      if (user) {
        deleteHistoryItem(user.id, timestamp);
      }
@@ -248,29 +242,18 @@ export default function App() {
       const tg = window.Telegram.WebApp;
       tg.expand();
       tg.ready();
-
-      if (tg.initDataUnsafe?.user) {
-        setUser(tg.initDataUnsafe.user);
-      }
-
-      tg.MainButton.setParams({
-        text: '✨ AI DEEP DIVE',
-        color: tg.themeParams.button_color || '#2481cc',
-        text_color: tg.themeParams.button_text_color || '#ffffff'
-      });
+      if (tg.initDataUnsafe?.user) setUser(tg.initDataUnsafe.user);
     }
     
     const saved = localStorage.getItem('ety_history');
     if (saved) {
-      try {
-        setHistory(JSON.parse(saved));
-      } catch (e) { console.error(e); }
+      try { setHistory(JSON.parse(saved)); } catch (e) { console.error(e); }
     }
 
     const params = new URLSearchParams(window.location.search);
     const deepLinkWord = params.get('word') || params.get('startapp') || window.Telegram?.WebApp?.initDataUnsafe?.start_param;
     if (deepLinkWord) {
-      setTimeout(() => handleSearch(deepLinkWord), 100);
+      setTimeout(() => handleSearch(deepLinkWord), 200);
     }
   }, []);
 
@@ -286,34 +269,40 @@ export default function App() {
     }
   }, [user]);
 
+  // Robust Telegram UI Management
   useEffect(() => {
     if (!window.Telegram?.WebApp) return;
     const tg = window.Telegram.WebApp;
-    const onMainBtnClick = () => handleGenerateSummary();
-    const onBackBtnClick = () => handleBack();
 
-    if (view === 'result' && !showProfile && !showLeaderboard && !showHistoryModal) {
-      tg.BackButton.show();
-      tg.BackButton.onClick(onBackBtnClick);
-      if (!showSummaryModal) {
-        tg.MainButton.show();
-        tg.MainButton.onClick(onMainBtnClick);
+    const updateUI = () => {
+      // Manage Back Button
+      if (view === 'result' || showProfile || showLeaderboard || showHistoryModal || showSummaryModal) {
+        tg.BackButton.show();
+        tg.BackButton.onClick(handleBack);
+      } else {
+        tg.BackButton.hide();
+        tg.BackButton.offClick(handleBack);
+      }
+
+      // Manage Main Button
+      if (view === 'result' && !showProfile && !showLeaderboard && !showHistoryModal && !showSummaryModal) {
+        tg.MainButton.setParams({
+          text: '✨ AI DEEP DIVE',
+          color: tg.themeParams.button_color || '#2481cc',
+          is_visible: true,
+          is_active: true
+        });
+        tg.MainButton.onClick(handleGenerateSummary);
       } else {
         tg.MainButton.hide();
+        tg.MainButton.offClick(handleGenerateSummary);
       }
-    } else if (showProfile || showLeaderboard || showHistoryModal) {
-       tg.BackButton.show();
-       tg.BackButton.onClick(onBackBtnClick);
-       tg.MainButton.hide();
-    } else {
-      tg.BackButton.hide();
-      tg.MainButton.hide();
-      tg.BackButton.offClick(onBackBtnClick);
-      tg.MainButton.offClick(onMainBtnClick);
-    }
+    };
+
+    updateUI();
     return () => {
-      tg.MainButton.offClick(onMainBtnClick);
-      tg.BackButton.offClick(onBackBtnClick);
+      tg.MainButton.offClick(handleGenerateSummary);
+      tg.BackButton.offClick(handleBack);
     };
   }, [view, showSummaryModal, showProfile, showLeaderboard, showHistoryModal, handleGenerateSummary, handleBack]);
 
@@ -344,7 +333,6 @@ export default function App() {
                       <path className="text-tg-button transition-all duration-1000 ease-out" strokeDasharray={`${nextLevelProgress}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
                    </svg>
                    <div className="absolute inset-0 flex items-center justify-center font-black text-sm text-tg-text">{userStats.level}</div>
-                   {userStats.badges.length > 0 && <div className="absolute -bottom-1 -right-1 text-yellow-500 drop-shadow-sm"><Crown size={12} fill="currentColor" /></div>}
                 </div>
                 <div className="hidden sm:flex flex-col items-start leading-none">
                    <span className="text-[10px] font-bold text-tg-hint uppercase tracking-wider">Level {userStats.level}</span>
@@ -370,8 +358,7 @@ export default function App() {
           <div className="text-center">
              <div className="relative inline-block">
                <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-20 rounded-full"></div>
-               <img src="/logo.png" alt="Ety.ai" className="relative z-10 w-28 h-28 mx-auto mb-6 object-contain animate-float drop-shadow-xl" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.querySelector('.fallback-logo')?.classList.remove('hidden'); }} />
-               <div className="fallback-logo hidden w-20 h-20 bg-gradient-to-br from-tg-button to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-tg-button/30 text-white rotate-3 hover:rotate-6 transition-transform">
+               <div className="w-20 h-20 bg-gradient-to-br from-tg-button to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-tg-button/30 text-white rotate-3 hover:rotate-6 transition-transform">
                  <span className="font-serif font-black text-4xl">Æ</span>
                </div>
              </div>
@@ -413,7 +400,7 @@ export default function App() {
 
           {view === 'result' && wordData && !isLoading && (
              <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                {!window.Telegram?.WebApp && <button onClick={handleBack} className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"><span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Search</button>}
+                {!window.Telegram?.WebApp && <button onClick={handleBack} className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"><span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Back</button>}
                 <WordCard data={wordData} initialImage={initialImage} onImageLoaded={handleImageLoaded} onShare={() => user && handleGamificationAction('SHARE')} />
                 {!window.Telegram?.WebApp && <button onClick={handleGenerateSummary} className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"><Wand2 size={22} /> Generate Deep Dive</button>}
              </div>
@@ -427,7 +414,7 @@ export default function App() {
               <button onClick={() => setShowWebLoginMessage(false)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"><X size={20} /></button>
               <div className="w-16 h-16 bg-[#229ED9] text-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/30"><Send size={32} className="-ml-1 mt-1" /></div>
               <h3 className="text-xl font-bold mb-2">Login with Telegram</h3>
-              <p className="text-sm opacity-70 mb-6 leading-relaxed">To save your progress, earn badges, and track history, please open this app inside Telegram.</p>
+              <p className="text-sm opacity-70 mb-6 leading-relaxed">To save your progress and earn badges, please open this app inside Telegram.</p>
               <a href="https://t.me/newetybot" target="_blank" rel="noopener noreferrer" className="block w-full py-3.5 bg-[#229ED9] hover:bg-[#1b8abf] text-white font-bold rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-500/20">Open @newetybot</a>
            </div>
         </div>
