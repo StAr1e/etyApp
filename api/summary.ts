@@ -28,9 +28,10 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
             const status = e.status;
             if (status === 429 || msg.includes('429') || msg.includes('quota')) throw e; 
 
+            // Handle 503 Overloaded with backoff
             const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
             if (isOverloaded && i < retries - 1) {
-                const delay = 1000 * Math.pow(2, i);
+                const delay = 800 * Math.pow(2, i);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
@@ -61,25 +62,16 @@ export default async function handler(request: any, response: any) {
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    // Vercel Serverless (Free) has 10s timeout. 
-    // We aim for generation under 5s.
     const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error("Timeout")), 9500)
     );
 
     const generationPromise = generateWithRetry(ai, {
-      model: 'gemini-2.5-flash',
-      contents: `Write a fun, fast-paced, and engaging etymology story for "${cleanWord}". 
-      
-      Instructions:
-      1. If it's a symbol (like @, &, #), explain its origin (e.g., monks, scribes, or keyboards).
-      2. If it's a word, trace its journey.
-      3. Keep it **under 200 words** to ensure it loads instantly.
-      4. Focus on the most surprising twist or "aha!" moment.
-      5. Do not be dry. Be a storyteller.`,
+      model: 'gemini-3-flash-preview',
+      contents: `Etymology summary of "${cleanWord}". Concise, engaging story. Max 120 words. Focus on origins and evolution.`,
       config: { 
-          maxOutputTokens: 600, // Reduced from 1000 to prevent timeouts. 600 tokens is ~250 words.
-          temperature: 0.8 
+          maxOutputTokens: 300, 
+          temperature: 0.7 
       }
     });
 
@@ -95,11 +87,10 @@ export default async function handler(request: any, response: any) {
     console.error("Summary API Error:", error.message);
     const msg = (error.message || "").toLowerCase();
     
-    // Fallback if timeout or error
-    let mockSummary = `We are currently experiencing very high demand. The AI deep dive for "${cleanWord}" is temporarily unavailable.`;
+    let mockSummary = `The AI is currently receiving high traffic. Please try generating the deep dive again in a few seconds.`;
     
     if (msg.includes("timeout")) {
-        mockSummary = `The story of "${cleanWord}" is complex, but our scribe took too long to write it! Please try again in a moment.`;
+        mockSummary = `The history of "${cleanWord}" is vast, but our system timed out. Try again in a moment.`;
     }
     
     cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });
