@@ -6,7 +6,7 @@ import { LeaderboardModal } from './components/LeaderboardModal';
 import { HistoryModal } from './components/HistoryModal'; // Import new modal
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
-import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo } from './services/gamification';
+import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo, deleteHistoryItem, clearUserHistory } from './services/gamification';
 import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock, Send, ServerCrash } from 'lucide-react';
 
 export default function App() {
@@ -257,14 +257,25 @@ export default function App() {
   };
 
   const handleDeleteHistory = (timestamp: number) => {
+     // 1. Update Local State
      const newHistory = history.filter(h => h.timestamp !== timestamp);
      setHistory(newHistory);
      localStorage.setItem('ety_history', JSON.stringify(newHistory));
+     
+     // 2. Sync to Server if logged in
+     if (user) {
+       deleteHistoryItem(user.id, timestamp);
+     }
   };
 
   const handleClearHistory = () => {
      setHistory([]);
      localStorage.removeItem('ety_history');
+     
+     // Sync to Server
+     if (user) {
+        clearUserHistory(user.id);
+     }
   };
 
   // --- Lifecycle & Telegram SDK ---

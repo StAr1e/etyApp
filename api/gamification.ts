@@ -66,8 +66,6 @@ export default async function handler(request: any, response: any) {
       if (!userId) return response.status(400).json({ error: "userId required" });
       const idStr = userId.toString();
 
-      // 1. Fetch User (Create if missing)
-      // We explicitly type user as 'any' to avoid TS conflicts between Model return types and re-assignments
       let user: any = await User.findOne({ userId: idStr });
       
       if (!user) {
@@ -79,7 +77,7 @@ export default async function handler(request: any, response: any) {
          });
       }
 
-      // 2. Check Streak (Atomic Update if needed)
+      // Check Streak
       const last = new Date(user.stats.lastVisit);
       const now = new Date();
       const isSameDay = last.getDate() === now.getDate() && 
@@ -102,8 +100,6 @@ export default async function handler(request: any, response: any) {
            };
         }
         
-        // Apply atomic streak update
-        // user is definitely defined here because we just created/fetched it.
         const updated = await User.findOneAndUpdate(
             { userId: idStr },
             streakUpdate,
@@ -112,18 +108,16 @@ export default async function handler(request: any, response: any) {
         if (updated) user = updated;
       }
       
-      // 3. Post-Check Badges (in case of streak update or migration)
+      // Post-Check Badges
       const { newBadges, bonusXP } = getNewBadges(user.stats);
       if (newBadges.length > 0 || bonusXP > 0) {
           const updates: any = { 
             $addToSet: { 'stats.badges': { $each: newBadges } },
             $inc: { 'stats.xp': bonusXP }
           };
-          // Apply badges
           const updated = await User.findOneAndUpdate({ userId: idStr }, updates, { new: true });
           if (updated) user = updated;
           
-          // Re-check Level after bonus XP
           const correctLevel = calculateLevel(user.stats.xp);
           if (user.stats.level !== correctLevel) {
               const leveledUp = await User.findOneAndUpdate(
@@ -140,14 +134,38 @@ export default async function handler(request: any, response: any) {
 
     // --- POST ACTIONS ---
     if (request.method === 'POST') {
-      const { userId, action, name, photo, stats: syncedStats, payload } = request.body;
+      const { userId, action, name, photo, stats: syncedStats, payload, timestamp } = request.body;
       if (!action) return response.status(400).json({ error: "Missing action" });
 
-      // LEADERBOARD LOGIC
+      if (!userId) return response.status(400).json({ error: "userId required" });
+      const idStr = userId.toString();
+
+      // --- DELETE HISTORY HANDLERS ---
+      if (action === 'DELETE_HISTORY') {
+          if (!timestamp) return response.status(400).json({ error: "Timestamp required for deletion" });
+          
+          const updatedUser = await User.findOneAndUpdate(
+              { userId: idStr },
+              { $pull: { searchHistory: { timestamp: timestamp } } },
+              { new: true }
+          );
+          return response.status(200).json({ success: true, history: updatedUser?.searchHistory || [] });
+      }
+
+      if (action === 'CLEAR_HISTORY') {
+          const updatedUser = await User.findOneAndUpdate(
+              { userId: idStr },
+              { $set: { searchHistory: [] } },
+              { new: true }
+          );
+          return response.status(200).json({ success: true, history: [] });
+      }
+
+      // --- LEADERBOARD LOGIC ---
       if (action === 'LEADERBOARD') {
         if (userId) {
           await User.findOneAndUpdate(
-            { userId: userId.toString() },
+            { userId: idStr },
             { 
               $set: { 
                  'profile.name': name || 'Explorer', 
@@ -176,10 +194,7 @@ export default async function handler(request: any, response: any) {
         })));
       }
 
-      if (!userId) return response.status(400).json({ error: "userId required" });
-      const idStr = userId.toString();
-
-      // --- PHASE 1: ATOMIC ACTION UPDATE ---
+      // --- STAT UPDATE ACTIONS ---
       const now = Date.now();
       let update: any = { 
           $set: { 'stats.lastVisit': now },

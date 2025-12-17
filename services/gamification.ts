@@ -198,6 +198,27 @@ export const fetchUserStats = async (user: TelegramUser): Promise<{ stats: UserS
   }
 };
 
+// New functions to handle deletion persistence
+export const deleteHistoryItem = async (userId: number, timestamp: number) => {
+    try {
+        await fetch('/api/gamification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, action: 'DELETE_HISTORY', timestamp })
+        });
+    } catch(e) { console.error("Failed to sync delete", e); }
+};
+
+export const clearUserHistory = async (userId: number) => {
+    try {
+        await fetch('/api/gamification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, action: 'CLEAR_HISTORY' })
+        });
+    } catch(e) { console.error("Failed to sync clear", e); }
+};
+
 export const trackAction = async (
   userId: number, 
   action: 'SEARCH' | 'SUMMARY' | 'SHARE',

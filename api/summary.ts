@@ -14,6 +14,12 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
         } catch (e: any) {
             const msg = (e.message || "").toLowerCase();
             const status = e.status;
+            
+            // If it's a Quota error, don't retry, just fail immediately to trigger fallback
+            if (status === 429 || msg.includes('429') || msg.includes('quota')) {
+                throw e;
+            }
+
             const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
             
             if (isOverloaded && i < retries - 1) {
@@ -72,7 +78,12 @@ export default async function handler(request: any, response: any) {
     console.error("Summary API Error:", error.message);
     
     // 2. Fallback Mock
-    const mockSummary = `We are currently experiencing very high demand. The AI summary for "${cleanWord}" is temporarily unavailable. Please check back in a few minutes!`;
+    const msg = (error.message || "").toLowerCase();
+    const isQuota = error.status === 429 || msg.includes('429') || msg.includes('quota');
+    
+    const mockSummary = isQuota 
+        ? `We've reached our daily AI limit! This is a placeholder summary for "${cleanWord}". Please try generating a deep dive again tomorrow.`
+        : `We are currently experiencing very high demand. The AI summary for "${cleanWord}" is temporarily unavailable. Please check back in a few minutes!`;
     
     // Short Cache for Mock
     cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });

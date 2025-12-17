@@ -11,20 +11,27 @@ const DAILY_LIMIT = 30;
 const cache = new Map<string, { data: any, timestamp: number, isMock: boolean }>();
 
 // --- MOCK DATA GENERATOR ---
-const getMockData = (word: string) => ({
+const getMockData = (word: string, reason: 'overload' | 'quota' = 'overload') => ({
     word: word,
-    phonetic: "/.../",
-    partOfSpeech: "unknown",
-    definition: "We are currently experiencing high traffic. This definition is temporarily unavailable.",
-    etymology: "The etymology origins are temporarily obscured by digital fog. Please try again in a few minutes.",
+    phonetic: `/${word.substring(0, 3)}.../`,
+    partOfSpeech: "noun (simulated)",
+    definition: reason === 'quota' 
+        ? "We hit our daily AI limit, so we generated this placeholder definition to keep the app running. Come back tomorrow for the real deal!" 
+        : "We are currently experiencing high traffic. This definition is temporarily unavailable.",
+    etymology: reason === 'quota'
+        ? "The origins of this word are currently locked behind a paywall of time. (Quota Exceeded)"
+        : "The etymology origins are temporarily obscured by digital fog. Please try again in a few minutes.",
     roots: [
-        { term: "Server", language: "Tech", meaning: "Overload" },
-        { term: "Retry", language: "English", meaning: "Attempt again" }
+        { term: "System", language: "Digital", meaning: reason === 'quota' ? "Limit Reached" : "Overload" },
+        { term: "Retry", language: "Action", meaning: "Later" }
     ],
     examples: [`The word "${word}" is popular right now!`],
     synonyms: ["Unavailable", "Pending"],
-    funFact: "This is a placeholder response because our AI brain is thinking too hard about other words right now!",
-    isMock: true // Frontend can use this to show a warning if needed
+    funFact: reason === 'quota' 
+        ? "Even AIs need a nap sometimes. We've reached our safe limit for today." 
+        : "This is a placeholder response because our AI brain is thinking too hard about other words right now!",
+    isMock: true, // Frontend can use this to show a warning if needed
+    mockReason: reason
 });
 
 // Helper to retry generation on 503/Overloaded errors
@@ -91,9 +98,9 @@ export default async function handler(request: any, response: any) {
                  const todayCount = user.searchHistory.filter((h: any) => h.timestamp > today.getTime()).length;
                  
                  if (todayCount >= DAILY_LIMIT) {
-                     return response.status(429).json({ 
-                         error: `Daily limit reached (${DAILY_LIMIT}/${DAILY_LIMIT}). Please try again tomorrow!` 
-                     });
+                     // Return Mock Data immediately if user quota hit
+                     const mock = getMockData(cleanWord, 'quota');
+                     return response.status(200).json(mock);
                  }
              }
          }
@@ -158,11 +165,14 @@ export default async function handler(request: any, response: any) {
     } catch (aiError: any) {
         console.error("AI Gen Failed:", aiError.message);
         
-        // 5. Fallback: Return Mock Data if Overloaded
-        // This keeps the app usable during spikes
-        const mock = getMockData(cleanWord);
+        const msg = (aiError.message || "").toLowerCase();
+        const isQuota = aiError.status === 429 || msg.includes('429') || msg.includes('quota');
         
-        // Cache Mock for SHORT time (5 mins) so we try again soon
+        // 5. Fallback: Return Mock Data
+        // If Quota exceeded (429) OR Overloaded (503), we return mock so the app works.
+        const mock = getMockData(cleanWord, isQuota ? 'quota' : 'overload');
+        
+        // Cache Mock
         cache.set(cacheKey, { data: mock, timestamp: Date.now(), isMock: true });
         
         return response.status(200).json(mock);
@@ -170,6 +180,10 @@ export default async function handler(request: any, response: any) {
 
   } catch (error: any) {
     console.error("Critical API Error:", error);
+    // Even on critical error, try to return mock if we have the word
+    if (request.query.word) {
+        return response.status(200).json(getMockData(request.query.word as string));
+    }
     return response.status(500).json({ error: "Internal Server Error" });
   }
 }
