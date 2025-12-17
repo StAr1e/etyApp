@@ -26,11 +26,11 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
         } catch (e: any) {
             const msg = (e.message || "").toLowerCase();
             const status = e.status;
-            if (status === 429 || msg.includes('429') || msg.includes('quota')) throw e; // Don't retry quota on same key
+            if (status === 429 || msg.includes('429') || msg.includes('quota')) throw e; 
 
             const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
             if (isOverloaded && i < retries - 1) {
-                const delay = 1500 * Math.pow(2, i);
+                const delay = 1000 * Math.pow(2, i);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
@@ -61,14 +61,24 @@ export default async function handler(request: any, response: any) {
   const ai = new GoogleGenAI({ apiKey });
 
   try {
+    // Vercel Serverless (Free) has 10s timeout. We must respond before that.
+    // 9.5s gives us a 500ms safety buffer.
+    // We use Promise.race to ensure we don't crash hard.
     const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout")), 9500)
+        setTimeout(() => reject(new Error("Timeout")), 9800)
     );
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-2.5-flash',
-      contents: `Story-style etymology summary of "${cleanWord}". Max 150 words. Focus on surprise.`,
-      config: { maxOutputTokens: 300 }
+      contents: `Write a comprehensive, engaging deep-dive history for "${cleanWord}". 
+      If it is a symbol (like @, &, #), explain its origins in manuscripts or typography and its modern evolution.
+      If it is a word, tell the full story of its journey through languages.
+      Structure it like a short blog post or story. 
+      Aim for 300-500 words of rich detail.`,
+      config: { 
+          maxOutputTokens: 1000, // Increased from 300 to allow longer stories
+          temperature: 0.8 
+      }
     });
 
     const result: any = await Promise.race([generationPromise, timeoutPromise]);
@@ -82,11 +92,13 @@ export default async function handler(request: any, response: any) {
   } catch (error: any) {
     console.error("Summary API Error:", error.message);
     const msg = (error.message || "").toLowerCase();
-    const isQuota = error.status === 429 || msg.includes('429') || msg.includes('quota');
     
-    const mockSummary = isQuota 
-        ? `We've reached our daily AI limit! This is a placeholder summary. Rotating keys will solve this.`
-        : `We are currently experiencing very high demand. Summary temporarily unavailable.`;
+    // Fallback if timeout or error
+    let mockSummary = `We are currently experiencing very high demand. The AI deep dive for "${cleanWord}" is temporarily unavailable.`;
+    
+    if (msg.includes("timeout")) {
+        mockSummary = `The story of "${cleanWord}" is so long and complex that our system timed out while writing it! Please try again in a moment.`;
+    }
     
     cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });
     return response.status(200).json({ summary: mockSummary });

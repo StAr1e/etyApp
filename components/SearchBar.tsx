@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, ArrowRight, CornerDownLeft } from 'lucide-react';
 import { SearchHistoryItem } from '../types';
@@ -30,9 +29,9 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Prevent spaces - single word only constraint
-    const val = e.target.value.replace(/\s/g, '');
-    setQuery(val);
+    // Allow everything except newlines. Symbols are allowed.
+    // We only trim spaces from the start to allow typing, but generally keep input raw
+    setQuery(e.target.value);
   };
 
   return (
@@ -58,7 +57,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, histo
             onChange={handleChange}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setTimeout(() => setIsFocused(false), 200)}
-            placeholder="Search etymology..."
+            placeholder="Search word or symbol (e.g. &)"
             className="bg-transparent border-none outline-none w-full text-tg-text placeholder-tg-hint/60 text-lg font-medium"
             autoComplete="off"
             autoCapitalize="off"

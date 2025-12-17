@@ -3,11 +3,11 @@ import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
 import { ProfileModal } from './components/ProfileModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
-import { HistoryModal } from './components/HistoryModal'; // Import new modal
+import { HistoryModal } from './components/HistoryModal'; 
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo, deleteHistoryItem, clearUserHistory } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, ChevronRight, Zap, Clock, Send, ServerCrash } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, Zap, Clock, Send, ServerCrash, Loader2 } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -27,6 +27,7 @@ export default function App() {
   
   // Summary State
   const [summary, setSummary] = useState<string | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false); // Track summary specific loading
   const [showSummaryModal, setShowSummaryModal] = useState(false);
   
   const hasInitialized = useRef(false);
@@ -102,14 +103,21 @@ export default function App() {
 
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
+    
+    // OPEN MODAL IMMEDIATELY IN LOADING STATE
+    setIsSummaryLoading(true);
+    setSummary(null);
+    setShowSummaryModal(true); 
+    
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.MainButton.showProgress(false);
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
+
     try {
       const text = await fetchWordSummary(wordData.word);
       setSummary(text);
-      setShowSummaryModal(true);
+      
       if(user) {
           handleGamificationAction('SUMMARY', { word: wordData.word, summary: text }); 
       }
@@ -121,10 +129,14 @@ export default function App() {
       });
       setHistory(updatedHistory);
       localStorage.setItem('ety_history', JSON.stringify(updatedHistory));
+      
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hide();
+
     } catch (e) {
       console.error(e);
+      setSummary("Failed to generate summary. Please try again.");
     } finally {
+      setIsSummaryLoading(false);
       if (window.Telegram?.WebApp) window.Telegram.WebApp.MainButton.hideProgress();
     }
   }, [wordData, user, history]); 
@@ -210,14 +222,10 @@ export default function App() {
   };
 
   const handleDeleteHistory = (timestamp: number) => {
-     // 1. Immediate Local Optimistic Update
      const newHistory = history.filter(h => h.timestamp !== timestamp);
      setHistory(newHistory);
      localStorage.setItem('ety_history', JSON.stringify(newHistory));
-     
-     // 2. Server Sync
      if (user) {
-       // We don't await this to keep UI fast, but it runs in background
        deleteHistoryItem(user.id, timestamp);
      }
   };
@@ -252,7 +260,6 @@ export default function App() {
       });
     }
     
-    // Load local history immediately for perceived performance
     const saved = localStorage.getItem('ety_history');
     if (saved) {
       try {
@@ -267,13 +274,10 @@ export default function App() {
     }
   }, []);
 
-  // Fetch Stats & History from Server
-  // IMPORTANT: We trust the Server history more than local storage to ensure deletions persist across devices
   useEffect(() => {
     if (user) {
         fetchUserStats(user).then(({ stats, history: serverHistory }) => {
             setUserStats(stats);
-            // If server returns history (even empty), we use it to ensure deleted items stay deleted
             if (serverHistory) {
                setHistory(serverHistory);
                localStorage.setItem('ety_history', JSON.stringify(serverHistory));
@@ -282,7 +286,6 @@ export default function App() {
     }
   }, [user]);
 
-  // Manage Native Buttons State (omitted detailed implementation for brevity, logic same as before)
   useEffect(() => {
     if (!window.Telegram?.WebApp) return;
     const tg = window.Telegram.WebApp;
@@ -439,15 +442,33 @@ export default function App() {
         </div>
       )}
 
-      {showSummaryModal && summary && (
+      {showSummaryModal && (
         <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/40 backdrop-blur-md animate-in fade-in duration-300 p-0 md:p-4">
            <div className="absolute inset-0" onClick={() => setShowSummaryModal(false)}></div>
            <div className="bg-tg-bg w-full max-w-md md:max-w-xl rounded-t-[2rem] md:rounded-3xl p-8 shadow-2xl animate-in slide-in-from-bottom duration-300 relative border-t md:border border-white/20 dark:border-white/5 max-h-[85vh] overflow-y-auto no-scrollbar">
               <div className="w-12 h-1.5 bg-tg-hint/20 rounded-full mx-auto mb-6 md:hidden"></div>
               <button onClick={() => setShowSummaryModal(false)} className="absolute top-6 right-6 p-2 bg-tg-secondaryBg rounded-full text-tg-hint hover:text-tg-text transition-colors hover:rotate-90 duration-300"><X size={20} /></button>
-              <div className="flex items-center gap-3 mb-6 text-tg-button"><div className="p-2.5 bg-tg-button/10 rounded-xl"><Wand2 size={24} /></div><h2 className="text-2xl font-bold font-serif text-tg-text">Deep Dive</h2></div>
-              <div className="prose prose-lg dark:prose-invert text-tg-text/90 leading-relaxed font-serif first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px] first-letter:text-tg-button"><p>{summary}</p></div>
-              <div className="mt-8 pt-6 border-t border-tg-hint/10"><button onClick={() => setShowSummaryModal(false)} className="w-full py-3.5 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-hint/10 transition-colors">Close</button></div>
+              
+              <div className="flex items-center gap-3 mb-6 text-tg-button">
+                 <div className="p-2.5 bg-tg-button/10 rounded-xl"><Wand2 size={24} /></div>
+                 <h2 className="text-2xl font-bold font-serif text-tg-text">Deep Dive</h2>
+              </div>
+              
+              {isSummaryLoading ? (
+                 <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                    <Loader2 size={48} className="animate-spin text-tg-button" />
+                    <p className="text-lg font-serif italic text-tg-text/70 animate-pulse">Writing your story...</p>
+                 </div>
+              ) : (
+                <>
+                  <div className="prose prose-lg dark:prose-invert text-tg-text/90 leading-relaxed font-serif first-letter:text-5xl first-letter:font-bold first-letter:float-left first-letter:mr-3 first-letter:mt-[-4px] first-letter:text-tg-button">
+                      <p>{summary}</p>
+                  </div>
+                  <div className="mt-8 pt-6 border-t border-tg-hint/10">
+                    <button onClick={() => setShowSummaryModal(false)} className="w-full py-3.5 bg-tg-secondaryBg text-tg-text font-bold rounded-xl hover:bg-tg-hint/10 transition-colors">Close</button>
+                  </div>
+                </>
+              )}
            </div>
         </div>
       )}

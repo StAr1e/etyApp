@@ -21,7 +21,6 @@ const getRotatedApiKey = () => {
     ].filter(k => !!k && k.length > 10); // Filter out undefined or empty
 
     if (keys.length === 0) return null;
-    // Pick random key to spread load
     return keys[Math.floor(Math.random() * keys.length)];
 };
 
@@ -29,16 +28,16 @@ const getRotatedApiKey = () => {
 const getMockData = (word: string, reason: 'overload' | 'quota' = 'overload') => ({
     word: word,
     phonetic: `/${word.substring(0, 3)}.../`,
-    partOfSpeech: "noun (simulated)",
+    partOfSpeech: "symbol/unknown",
     definition: reason === 'quota' 
         ? "We hit our daily AI limit. This is a placeholder while we cool down." 
         : "We are currently experiencing high traffic. This definition is temporarily unavailable.",
-    etymology: "The etymology origins are temporarily obscured. Please try again in a few minutes.",
+    etymology: "The origins are temporarily obscured. Please try again in a few minutes.",
     roots: [
         { term: "System", language: "Digital", meaning: reason === 'quota' ? "Limit Reached" : "Overload" },
         { term: "Retry", language: "Action", meaning: "Later" }
     ],
-    examples: [`The word "${word}" is popular right now!`],
+    examples: [`The term "${word}" is popular right now!`],
     synonyms: ["Unavailable", "Pending"],
     funFact: "This is a placeholder response.",
     isMock: true,
@@ -80,6 +79,7 @@ export default async function handler(request: any, response: any) {
       return response.status(400).json({ error: "Word parameter is required" });
     }
 
+    // Allow symbols by just trimming, do not enforce text-only rules in backend
     const cleanWord = (word as string).trim().toLowerCase();
     const cacheKey = `${CACHE_VERSION}:details:${cleanWord}`;
 
@@ -92,8 +92,7 @@ export default async function handler(request: any, response: any) {
         }
     }
 
-    // 3. Check Daily Limit (Only if not cached)
-    // Note: With key rotation, we might want to relax this, but keeping it per-user is good hygiene.
+    // 3. Check Daily Limit
     if (userId) {
        try {
          const db = await connectToDatabase();
@@ -116,7 +115,7 @@ export default async function handler(request: any, response: any) {
        }
     }
 
-    // 4. Initialize Gemini with Rotated Key
+    // 4. Initialize Gemini
     const ai = new GoogleGenAI({ apiKey });
     
     const schema: Schema = {
@@ -148,11 +147,21 @@ export default async function handler(request: any, response: any) {
     try {
         const result: any = await generateWithRetry(ai, {
             model: 'gemini-2.5-flash',
-            contents: `Analyze "${cleanWord}" for etymology app. Precise, concise details.`,
+            contents: `Analyze "${cleanWord}". If this is a word, provide etymology. If this is a symbol (like @, &, #), explain its history/usage.
+            
+            Format:
+            - word: "${cleanWord}"
+            - phonetic: Pronunciation (or N/A for symbols)
+            - definition: Concise meaning or usage.
+            - etymology: How it evolved or where it came from.
+            - roots: 2-3 historical origins (e.g. Latin term, or "ASCII" for symbols).
+            - examples: Usage in sentences or context.
+            - synonyms: Related concepts.
+            - funFact: A surprising fact about it.`,
             config: {
                 responseMimeType: 'application/json',
                 responseSchema: schema,
-                systemInstruction: "Expert etymologist. Concise.",
+                systemInstruction: "Expert etymologist and linguist. Handle words, phrases, and typographic symbols with depth.",
                 maxOutputTokens: 1000
             }
         });
@@ -172,14 +181,10 @@ export default async function handler(request: any, response: any) {
         console.error("AI Gen Failed:", aiError.message);
         const msg = (aiError.message || "").toLowerCase();
         
-        // If one key fails with quota, we return mock, BUT the next user request will pick a DIFFERENT key
-        // from the pool, effectively bypassing the block for the app as a whole.
         const isQuota = aiError.status === 429 || msg.includes('429') || msg.includes('quota');
         const mock = getMockData(cleanWord, isQuota ? 'quota' : 'overload');
         
-        // Shorter cache for failures
         cache.set(cacheKey, { data: mock, timestamp: Date.now(), isMock: true });
-        
         return response.status(200).json(mock);
     }
 
