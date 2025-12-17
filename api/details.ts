@@ -1,8 +1,10 @@
 import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { connectToDatabase, User } from '../lib/mongodb.js';
 
 // Simple in-memory cache
 const cache = new Map<string, { data: any, timestamp: number }>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const DAILY_LIMIT = 30;
 
 // Helper to retry generation on 503/Overloaded errors
 const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
@@ -42,7 +44,7 @@ export default async function handler(request: any, response: any) {
       return response.status(500).json({ error: "Configuration Error: GEMINI_API_KEY is missing in Vercel." });
     }
 
-    const { word } = request.query;
+    const { word, userId } = request.query;
     
     if (!word) {
       return response.status(400).json({ error: "Word parameter is required" });
@@ -56,7 +58,37 @@ export default async function handler(request: any, response: any) {
         return response.status(200).json(cached.data);
     }
 
-    // 2. Initialize Gemini
+    // 2. Check Daily Limit (if userId provided)
+    if (userId) {
+       try {
+         const db = await connectToDatabase();
+         if (db) {
+             const idStr = userId.toString();
+             const user = await User.findOne({ userId: idStr });
+             
+             if (user) {
+                 const today = new Date();
+                 today.setHours(0,0,0,0);
+                 
+                 // Count history items created today
+                 // Note: we filter the searchHistory array. For massive history, this might need optimization,
+                 // but for < 50 items (slice limit) it is negligible.
+                 const todayCount = user.searchHistory.filter((h: any) => h.timestamp > today.getTime()).length;
+                 
+                 if (todayCount >= DAILY_LIMIT) {
+                     return response.status(429).json({ 
+                         error: `Daily limit reached (${DAILY_LIMIT}/${DAILY_LIMIT}). Please try again tomorrow or explore your history!` 
+                     });
+                 }
+             }
+         }
+       } catch (dbErr) {
+           console.warn("DB Limit Check Failed:", dbErr);
+           // Fail open (allow search) if DB is down, to preserve core functionality
+       }
+    }
+
+    // 3. Initialize Gemini
     const ai = new GoogleGenAI({ apiKey });
 
     const schema: Schema = {
@@ -113,7 +145,7 @@ export default async function handler(request: any, response: any) {
     try {
         const parsedData = JSON.parse(text);
         
-        // 3. Save to Cache
+        // 4. Save to Cache
         if (cache.size > 100) {
             // Prevent memory leak by clearing old cache if too big
             const oldestKey = cache.keys().next().value;

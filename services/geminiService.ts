@@ -97,7 +97,7 @@ const WORD_SCHEMA: Schema = {
 
 // --- FETCH FUNCTIONS ---
 
-export const fetchWordDetails = async (word: string): Promise<WordData> => {
+export const fetchWordDetails = async (word: string, userId?: number): Promise<WordData> => {
   const cleanWord = word.trim().toLowerCase();
   
   // 1. Check Cache
@@ -140,11 +140,17 @@ export const fetchWordDetails = async (word: string): Promise<WordData> => {
 
   // SERVER MODE: Call /api/details
   try {
-    const response = await fetch(`/api/details?word=${encodeURIComponent(word)}`);
+    const response = await fetch(`/api/details?word=${encodeURIComponent(word)}&userId=${userId || ''}`);
     
     // Check quota before anything else
     if (response.status === 429) {
-       throw new Error("Daily AI usage limit reached. Please try again tomorrow!");
+       // Try to extract the custom limit message
+       let msg = "Daily AI usage limit reached. Please try again tomorrow!";
+       try {
+           const json = await response.json();
+           if (json.error) msg = json.error;
+       } catch {}
+       throw new Error(msg);
     }
 
     // CRITICAL CHECK: Ensure we got JSON, not the HTML index page

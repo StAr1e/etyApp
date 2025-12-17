@@ -207,7 +207,8 @@ export default function App() {
           if(localCached.summary) setSummary(localCached.summary);
       } else {
           // 2. Fetch from API (or Service Persistence Layer)
-          data = await fetchWordDetails(term);
+          // Pass user.id for rate limiting if available
+          data = await fetchWordDetails(term, user?.id);
       }
       
       setWordData(data);
@@ -536,7 +537,7 @@ export default function App() {
                     {isQuotaError ? "Daily Limit Reached" : isOverloaded ? "Server Busy" : "Connection Error"}
                  </p>
                  <p className="text-sm opacity-90 leading-relaxed">
-                    {isQuotaError ? "You've reached your daily AI limit. Please try again tomorrow!" : isOverloaded ? "The AI is thinking hard. Please try again in a few moments." : error}
+                    {isQuotaError ? error : isOverloaded ? "The AI is thinking hard. Please try again in a few moments." : error}
                  </p>
                  {/* Env Hint for Devs */}
                  {!isQuotaError && !isOverloaded && error.includes("API Key missing") && (
