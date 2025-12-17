@@ -61,22 +61,24 @@ export default async function handler(request: any, response: any) {
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    // Vercel Serverless (Free) has 10s timeout. We must respond before that.
-    // 9.5s gives us a 500ms safety buffer.
-    // We use Promise.race to ensure we don't crash hard.
+    // Vercel Serverless (Free) has 10s timeout. 
+    // We aim for generation under 5s.
     const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout")), 9800)
+        setTimeout(() => reject(new Error("Timeout")), 9500)
     );
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-2.5-flash',
-      contents: `Write a comprehensive, engaging deep-dive history for "${cleanWord}". 
-      If it is a symbol (like @, &, #), explain its origins in manuscripts or typography and its modern evolution.
-      If it is a word, tell the full story of its journey through languages.
-      Structure it like a short blog post or story. 
-      Aim for 300-500 words of rich detail.`,
+      contents: `Write a fun, fast-paced, and engaging etymology story for "${cleanWord}". 
+      
+      Instructions:
+      1. If it's a symbol (like @, &, #), explain its origin (e.g., monks, scribes, or keyboards).
+      2. If it's a word, trace its journey.
+      3. Keep it **under 200 words** to ensure it loads instantly.
+      4. Focus on the most surprising twist or "aha!" moment.
+      5. Do not be dry. Be a storyteller.`,
       config: { 
-          maxOutputTokens: 1000, // Increased from 300 to allow longer stories
+          maxOutputTokens: 600, // Reduced from 1000 to prevent timeouts. 600 tokens is ~250 words.
           temperature: 0.8 
       }
     });
@@ -97,7 +99,7 @@ export default async function handler(request: any, response: any) {
     let mockSummary = `We are currently experiencing very high demand. The AI deep dive for "${cleanWord}" is temporarily unavailable.`;
     
     if (msg.includes("timeout")) {
-        mockSummary = `The story of "${cleanWord}" is so long and complex that our system timed out while writing it! Please try again in a moment.`;
+        mockSummary = `The story of "${cleanWord}" is complex, but our scribe took too long to write it! Please try again in a moment.`;
     }
     
     cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });
