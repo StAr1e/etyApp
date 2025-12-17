@@ -1,117 +1,82 @@
 import { GoogleGenAI } from "@google/genai";
 
-const cache = new Map<string, { data: string, timestamp: number }>();
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+// --- CONFIGURATION ---
+const CACHE_VERSION = 'v1';
+const TTL_SUCCESS = 24 * 60 * 60 * 1000;
+const TTL_MOCK = 5 * 60 * 1000;
 
-// Helper to retry generation on 503/Overloaded errors
+const cache = new Map<string, { data: string, timestamp: number, isMock: boolean }>();
+
 const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
     for (let i = 0; i < retries; i++) {
         try {
             return await ai.models.generateContent(params);
         } catch (e: any) {
             const msg = (e.message || "").toLowerCase();
-            const status = e.status; // Check explicit status code if available
-
-            const isOverloaded = 
-                status === 503 || 
-                msg.includes('503') || 
-                msg.includes('overloaded') || 
-                msg.includes('unavailable');
+            const status = e.status;
+            const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
             
             if (isOverloaded && i < retries - 1) {
-                // Exponential backoff: 2s, 4s, 8s...
-                const delay = 2000 * Math.pow(2, i);
-                console.log(`Summary Gen Overloaded (Attempt ${i+1}/${retries}). Retrying...`);
+                const delay = 1500 * Math.pow(2, i);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
             throw e;
         }
     }
-    throw new Error("Model overloaded after retries");
+    throw new Error("Model overloaded");
 }
 
 export default async function handler(request: any, response: any) {
   const apiKey = process.env.GEMINI_API_KEY;
-  
-  if (!apiKey) {
-    return response.status(500).json({ 
-        error: "Server Configuration Error: GEMINI_API_KEY is missing. Please add it to your Vercel Environment Variables." 
-    });
-  }
+  if (!apiKey) return response.status(500).json({ error: "Server Configuration Error" });
 
   const { word } = request.query;
-  
-  if (!word) {
-    return response.status(400).json({ error: "Word parameter is required" });
-  }
+  if (!word) return response.status(400).json({ error: "Word required" });
 
   const cleanWord = (word as string).trim().toLowerCase();
+  const cacheKey = `${CACHE_VERSION}:summary:${cleanWord}`;
 
   // 1. Check Cache
-  const cached = cache.get(cleanWord);
-  if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
-      return response.status(200).json({ summary: cached.data });
+  const cached = cache.get(cacheKey);
+  if (cached) {
+      const ttl = cached.isMock ? TTL_MOCK : TTL_SUCCESS;
+      if (Date.now() - cached.timestamp < ttl) {
+          return response.status(200).json({ summary: cached.data });
+      }
   }
 
   const ai = new GoogleGenAI({ apiKey });
 
   try {
-    // Wrap Gemini call in a timeout promise to prevent Vercel 504 HTML errors
     const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Timeout: AI generation took too long.")), 9500)
+        setTimeout(() => reject(new Error("Timeout")), 9500)
     );
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-2.5-flash',
-      contents: `Story-style etymology summary of "${word}". Max 150 words. Focus on surprise.`,
+      contents: `Story-style etymology summary of "${cleanWord}". Max 150 words. Focus on surprise.`,
       config: { maxOutputTokens: 300 }
     });
 
-    // Race the generation against the timeout
     const result: any = await Promise.race([generationPromise, timeoutPromise]);
-    
     const text = result.text || "";
 
-    // 2. Set Cache
-    if (cache.size > 100) {
-        const oldestKey = cache.keys().next().value;
-        if(oldestKey) cache.delete(oldestKey);
-    }
-    cache.set(cleanWord, { data: text, timestamp: Date.now() });
+    // Success Cache
+    if (cache.size > 100) cache.delete(cache.keys().next().value!);
+    cache.set(cacheKey, { data: text, timestamp: Date.now(), isMock: false });
 
     return response.status(200).json({ summary: text });
+
   } catch (error: any) {
-    console.error("Summary API Error:", error);
+    console.error("Summary API Error:", error.message);
     
-    // UNWRAP ERROR: Sometimes the error message is a JSON string from the SDK
-    let readableMessage = error.message || "Internal Server Error";
-    if (typeof readableMessage === 'string' && readableMessage.trim().startsWith('{')) {
-        try {
-            const parsed = JSON.parse(readableMessage);
-            if (parsed.error && parsed.error.message) {
-                readableMessage = parsed.error.message;
-            }
-        } catch(e) {}
-    }
-
-    const msg = readableMessage.toLowerCase();
+    // 2. Fallback Mock
+    const mockSummary = `We are currently experiencing very high demand. The AI summary for "${cleanWord}" is temporarily unavailable. Please check back in a few minutes!`;
     
-    // Handle Quota Limits (429)
-    if (error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('exhausted')) {
-       return response.status(429).json({ error: "Daily AI usage limit reached." });
-    }
+    // Short Cache for Mock
+    cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });
 
-    // Handle Overloaded (503)
-    if (error.status === 503 || msg.includes('503') || msg.includes('overloaded') || msg.includes('unavailable')) {
-        return response.status(503).json({ error: "The AI model is currently overloaded. Please try again in a moment." });
-    }
-
-    // Handle Timeouts specially
-    if (msg.includes("timeout")) {
-        return response.status(504).json({ error: "AI generation timed out. Please try again." });
-    }
-
-    return response.status(500).json({ error: readableMessage || "Failed to generate summary" });
+    return response.status(200).json({ summary: mockSummary });
   }
 }
