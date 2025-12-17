@@ -11,13 +11,18 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
             return await ai.models.generateContent(params);
         } catch (e: any) {
             const msg = (e.message || "").toLowerCase();
+            const status = e.status; // Check explicit status code if available
+
             // Check for 503 Service Unavailable or Overloaded
-            // Sometimes the error message is a JSON string containing code 503
-            const isOverloaded = msg.includes('503') || msg.includes('overloaded') || msg.includes('unavailable');
+            const isOverloaded = 
+                status === 503 || 
+                msg.includes('503') || 
+                msg.includes('overloaded') || 
+                msg.includes('unavailable');
             
             if (isOverloaded && i < retries - 1) {
-                // Exponential backoff: 1s, 2s, 4s...
-                const delay = 1000 * Math.pow(2, i);
+                // Exponential backoff: 2s, 4s, 8s... (Starting slower to give server time)
+                const delay = 2000 * Math.pow(2, i);
                 console.log(`AI Overloaded (Attempt ${i+1}/${retries}). Retrying in ${delay}ms...`);
                 await new Promise(r => setTimeout(r, delay));
                 continue;
