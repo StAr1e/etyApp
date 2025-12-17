@@ -100,15 +100,15 @@ export default function App() {
   const handleGenerateSummary = useCallback(async () => {
     if (!wordData) return;
     
-    // Check if we already have it to avoid redundant AI calls
+    // Open modal immediately
+    setShowSummaryModal(true);
+
+    // If we already have it to avoid redundant AI calls
     if (summary && summary.length > 50 && !summary.includes("timeout")) {
-      setShowSummaryModal(true);
       return;
     }
 
     setIsSummaryLoading(true);
-    setShowSummaryModal(true); 
-    
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
     }
@@ -275,7 +275,7 @@ export default function App() {
     const tg = window.Telegram.WebApp;
 
     const updateUI = () => {
-      // Manage Back Button
+      // Back Button Management
       if (view === 'result' || showProfile || showLeaderboard || showHistoryModal || showSummaryModal) {
         tg.BackButton.show();
         tg.BackButton.onClick(handleBack);
@@ -284,7 +284,7 @@ export default function App() {
         tg.BackButton.offClick(handleBack);
       }
 
-      // Manage Main Button
+      // Main Button Management
       if (view === 'result' && !showProfile && !showLeaderboard && !showHistoryModal && !showSummaryModal) {
         tg.MainButton.setParams({
           text: '✨ AI DEEP DIVE',
@@ -292,6 +292,7 @@ export default function App() {
           is_visible: true,
           is_active: true
         });
+        tg.MainButton.show();
         tg.MainButton.onClick(handleGenerateSummary);
       } else {
         tg.MainButton.hide();
@@ -355,14 +356,14 @@ export default function App() {
         </div>
 
         <header className={`flex flex-col items-center justify-center transition-all duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${view === 'result' ? 'h-0 overflow-hidden opacity-0 scale-95' : 'flex-1 max-h-[40vh] opacity-100 scale-100'}`}>
-          <div className="text-center">
-             <div className="relative inline-block">
-               <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-20 rounded-full"></div>
-               <div className="w-20 h-20 bg-gradient-to-br from-tg-button to-purple-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-tg-button/30 text-white rotate-3 hover:rotate-6 transition-transform">
-                 <span className="font-serif font-black text-4xl">Æ</span>
-               </div>
+          <div className="text-center group">
+             <div className="relative inline-block mb-4">
+               <div className="absolute inset-0 bg-tg-button blur-[40px] opacity-10 rounded-full group-hover:opacity-20 transition-opacity"></div>
+               <h1 className="relative z-10 font-serif text-5xl font-black text-tg-text tracking-tighter italic">
+                 Ety<span className="text-tg-button">.</span>ai
+               </h1>
              </div>
-             <p className="text-tg-hint font-medium text-base mt-2">Uncover the stories behind words</p>
+             <p className="text-tg-hint font-medium text-base">Uncover the stories behind words</p>
           </div>
         </header>
 

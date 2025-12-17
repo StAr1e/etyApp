@@ -29,7 +29,6 @@ bot.on('inline_query', async (ctx) => {
       id: 'default',
       title: 'Search Ety.ai',
       description: 'Type a word to search...',
-      thumbnail_url: 'https://cdn-icons-png.flaticon.com/512/3976/3976625.png',
       input_message_content: {
         message_text: 'Check out Ety.ai for word origins!'
       },
@@ -52,7 +51,6 @@ bot.on('inline_query', async (ctx) => {
   }
 
   // Construct Deep Link URL
-  // We append ?word=TERM so the web app knows what to load immediately
   const deepLinkUrl = `${APP_URL}?word=${encodeURIComponent(title)}`;
 
   const results = [{
@@ -60,7 +58,6 @@ bot.on('inline_query', async (ctx) => {
     id: String(Date.now()),
     title: title,
     description: description,
-    thumbnail_url: 'https://cdn-icons-png.flaticon.com/512/3976/3976625.png',
     input_message_content: {
       message_text: messageText,
       parse_mode: 'HTML'
