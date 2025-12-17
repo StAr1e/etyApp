@@ -88,14 +88,14 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         loadImage();
     }
     
-    // Cleanup audio on word change
+    // Cleanup previous audio blob on word change
     if (audioBlobUrl) {
       URL.revokeObjectURL(audioBlobUrl);
       setAudioBlobUrl(null);
     }
     setIsPlaying(false);
     setAudioError(false);
-  }, [data.word, initialImage, loadImage]);
+  }, [data.word]);
 
   // --- AUDIO LOGIC ---
 
@@ -109,7 +109,10 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     if (audioBlobUrl) {
       if(audioRef.current) {
          audioRef.current.playbackRate = playbackRate;
-         audioRef.current.play().catch(() => setAudioError(true));
+         audioRef.current.play().catch((err) => {
+            console.error("Audio Playback Error:", err);
+            setAudioError(true);
+         });
          setIsPlaying(true);
       }
       return;
@@ -118,38 +121,42 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     setIsAudioLoading(true);
     setAudioError(false);
     try {
-      // Narrate the complete passage: Word, definition, etymology, and fact.
-      const fullText = `${data.word}. ${data.definition}. ${data.etymology}. Surprising fact: ${data.funFact}`;
+      // Narrate the complete passage clearly
+      const fullText = `${data.word}. Definition: ${data.definition}. Origin history: ${data.etymology}. Fun fact: ${data.funFact}`;
       
       const audioBuffer = await fetchPronunciation(fullText);
       
-      if (audioBuffer) {
+      if (audioBuffer && audioBuffer.byteLength > 0) {
         const SAMPLE_RATE = 24000;
-        // Fix for alignment: use slice to ensure the buffer length is correct for Int16Array
-        const safeBuffer = audioBuffer.slice(0, audioBuffer.byteLength - (audioBuffer.byteLength % 2));
+        
+        // Ensure byte length is even for Int16Array
+        const evenByteLength = audioBuffer.byteLength - (audioBuffer.byteLength % 2);
+        const safeBuffer = audioBuffer.slice(0, evenByteLength);
         const pcmData = new Int16Array(safeBuffer);
+        
         const wavBlob = writeWavHeader(pcmData, SAMPLE_RATE);
         const url = URL.createObjectURL(wavBlob);
         
         setAudioBlobUrl(url);
         
-        // Use a short delay to ensure browser handles the Blob URL
+        // Short delay to ensure browser processed the Blob URL
         setTimeout(() => {
           if (audioRef.current) {
+            audioRef.current.load(); // Forces reload of the source
             audioRef.current.playbackRate = playbackRate;
-            audioRef.current.play().then(() => {
-              setIsPlaying(true);
-            }).catch((err) => {
-              console.error("Playback failed", err);
-              setAudioError(true);
-            });
+            audioRef.current.play()
+              .then(() => setIsPlaying(true))
+              .catch((err) => {
+                console.error("Playback failed after load", err);
+                setAudioError(true);
+              });
           }
         }, 100);
       } else {
         setAudioError(true);
       }
     } catch (e) {
-      console.error("Audio generation failed", e);
+      console.error("Audio generation exception", e);
       setAudioError(true);
     } finally {
       setIsAudioLoading(false);
@@ -175,8 +182,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     if (!audioBlobUrl) return;
 
     try {
-      const response = await fetch(audioBlobUrl);
-      const blob = await response.blob();
       const filename = `ety_ai_${data.word}.wav`;
       
       // Fallback: Create direct link and trigger click
@@ -189,11 +194,13 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
 
       // Telegram-specific: Try native sharing of file
       if (window.Telegram?.WebApp && navigator.share) {
+         const response = await fetch(audioBlobUrl);
+         const blob = await response.blob();
          const file = new File([blob], filename, { type: 'audio/wav' });
          if (navigator.canShare && navigator.canShare({ files: [file] })) {
            await navigator.share({
              files: [file],
-             title: `Ety.ai Narrator: ${data.word}`,
+             title: `Ety.ai Narrative: ${data.word}`,
            });
          }
       }
@@ -336,7 +343,11 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
           ref={audioRef} 
           src={audioBlobUrl || undefined}
           onEnded={() => setIsPlaying(false)}
-          onError={() => { setIsPlaying(false); setIsAudioLoading(false); setAudioError(true); }}
+          onError={() => { 
+            setIsPlaying(false); 
+            setIsAudioLoading(false); 
+            setAudioError(true); 
+          }}
         />
         
         <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-tg-button/5 to-purple-500/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>

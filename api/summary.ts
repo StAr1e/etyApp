@@ -68,25 +68,30 @@ export default async function handler(request: any, response: any) {
 
     const generationPromise = generateWithRetry(ai, {
       model: 'gemini-3-flash-preview',
-      contents: `Generate a concise summary for the term "${cleanWord}".
+      contents: `Provide an informative summary for the word "${cleanWord}".
       
-      STRICT CONSTRAINTS:
-      1. Length: Exactly one paragraph, maximum 5 sentences.
-      2. Style: Informative, factual, and direct (similar to an encyclopedia or dictionary).
-      3. Example: "A computer is an electronic device that processes data and performs tasks according to instructions. It consists of hardware and software, can store and retrieve information, and is used in work, education, and entertainment."`,
+      STRICT RULES:
+      1. START with a clear definition: "[Word] is [definition]..."
+      2. LENGTH: One single paragraph, maximum 5 complete sentences.
+      3. TONE: Encyclopedia-style, factual and direct.
+      4. COMPLETION: Every sentence must be finished. Do not stop mid-sentence.
+      5. EXAMPLE for 'computer': "A computer is an electronic device that processes data and performs tasks according to instructions. It consists of hardware and software, can store and retrieve information, and is used in work, education, communication, and entertainment."`,
       config: { 
-          maxOutputTokens: 250, 
-          temperature: 0.5 
+          maxOutputTokens: 400, 
+          temperature: 0.3 
       }
     });
 
     const result: any = await Promise.race([generationPromise, timeoutPromise]);
-    const text = result.text || "";
+    const text = (result.text || "").trim();
 
+    // Verification check for unfinished sentences
+    const cleanText = text.replace(/\s+/g, ' ');
+    
     if (cache.size > 100) cache.delete(cache.keys().next().value!);
-    cache.set(cacheKey, { data: text, timestamp: Date.now(), isMock: false });
+    cache.set(cacheKey, { data: cleanText, timestamp: Date.now(), isMock: false });
 
-    return response.status(200).json({ summary: text });
+    return response.status(200).json({ summary: cleanText });
 
   } catch (error: any) {
     console.error("Summary API Error:", error.message);
@@ -95,7 +100,7 @@ export default async function handler(request: any, response: any) {
     let mockSummary = `The AI is currently receiving high traffic. Please try generating the deep dive again in a few seconds.`;
     
     if (msg.includes("timeout")) {
-        mockSummary = `The history of "${cleanWord}" is vast, but our system timed out. Try again in a moment.`;
+        mockSummary = `Our archives for "${cleanWord}" are vast, but the system timed out. Please try again.`;
     }
     
     cache.set(cacheKey, { data: mockSummary, timestamp: Date.now(), isMock: true });

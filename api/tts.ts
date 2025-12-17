@@ -32,7 +32,7 @@ export default async function handler(request: any, response: any) {
       model: 'gemini-2.5-flash-preview-tts',
       contents: [{ parts: [{ text: text as string }] }],
       config: {
-        systemInstruction: "You are a professional narrator for a word dictionary app. Speak clearly, at a moderate pace, with informative and warm inflection. Pause slightly between the word name and its definition.",
+        systemInstruction: "You are a warm and knowledgeable professional narrator for Ety.ai. Speak at a clear, comfortable pace. Use pauses between different sections of information (definition, origin, and facts) to ensure the listener can follow easily.",
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
