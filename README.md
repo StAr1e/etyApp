@@ -250,7 +250,7 @@ Displays user word history also can delete and clear history.
 ### 5️⃣ Profile, XP & Global Leaderboard
 ![Profile](assets/images/screenshots/s5.jpeg)
 ![XP Level](assets/images/screenshots/s5_1.jpeg)
-![Leaderboard](assets/images/screenshots/s5_2.jpeg)
+![Leaderboard](assets/images/screenshots/s5_3.jpeg)
 ```
 
 Shows gamification, competition, and retention mechanics.
