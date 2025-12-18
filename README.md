@@ -212,21 +212,20 @@ Ety.ai runs entirely **inside Telegram** using a Web App + Bot hybrid model, req
 
 ### 1️⃣ Bot Launch & Home Screen
 
-```
-![Screenshot 1](assets/s1.JPEG)
-```
+### 1️⃣ Bot Launch & Home Screen
+![Bot Launch](assets/images/screenshots/s1.jpeg)
+
 
 Shows the first interaction when a user opens the bot and launches the Web App.
 
 ---
 
 ### 2️⃣ Word Search & AI Discovery
+![Search Result](assets/images/screenshots/s2.jpeg)
+![Etymology](assets/images/screenshots/s2_1.jpeg)
+![Visual](assets/images/screenshots/s2_2.jpeg)
+![XP Earned](assets/images/screenshots/s2_3.jpeg)
 
-```
-![Screenshot 2](assets/s2.JPEG)
-![Screenshot 2.1](assets/s2.1.JPEG)
-![Screenshot 2.2](assets/s2.2.JPEG)
-![Screenshot 2.3](assets/s2.3.JPEG)
 
 ```
 
@@ -235,31 +234,23 @@ Highlights instant AI response.
 ---
 
 ### 3️⃣ AI Deep Dive (Main Button)
-
-```
-![Screenshot 3](assets/images/screenshots/s3.JPEG)
-```
+![Deep Dive](assets/images/screenshots/s3.jpeg)
 
 Demonstrates native Telegram UI control and long-form AI reasoning.
 
 ---
 
-### 5️⃣ Words History
-
-```
-![Screenshot 4](assets/s4.JPEG)
+### 4️⃣ Words History
+![History](assets/images/screenshots/s4.jpeg)
 ```
 
 Displays user word history also can delete and clear history.
 
 ---
-
-### 6️⃣ Profile, XP & Global Leaderboard
-
-```
-![Screenshot 5](assets/s5.JPEG)
-![Screenshot 5.1](assets/s5.1.JPEG)
-![Screenshot 5.2](assets/5.2.jpeg.JPEG)
+### 5️⃣ Profile, XP & Global Leaderboard
+![Profile](assets/images/screenshots/s5.jpeg)
+![XP Level](assets/images/screenshots/s5_1.jpeg)
+![Leaderboard](assets/images/screenshots/s5_2.jpeg)
 ```
 
 Shows gamification, competition, and retention mechanics.
