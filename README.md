@@ -213,7 +213,7 @@ To ensure smooth experience:
 ### 5️⃣ Profile, XP & Global Leaderboard
 ![Profile](assets/images/screenshots/s5.jpeg)
 ![XP Level](assets/images/screenshots/s5_1.jpeg)
-![Leaderboard](assets/images/screenshots/s5_2.jpeg)
+![Leaderboard](assets/images/screenshots/5_2.jpeg)
 
 ---
 
