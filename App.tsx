@@ -104,7 +104,7 @@ export default function App() {
     setShowSummaryModal(true);
 
     // If we already have it to avoid redundant AI calls
-    if (summary && summary.length > 50 && !summary.includes("updated")) {
+    if (summary && summary.length > 50 && !summary.toLowerCase().includes("indexed")) {
       return;
     }
 
@@ -131,7 +131,7 @@ export default function App() {
 
     } catch (e) {
       console.error(e);
-      setSummary("Our scribe is currently busy. Please try generating the deep dive again in a few moments.");
+      setSummary("Our scribes are currently busy. Please try generating the deep dive again in a few moments.");
     } finally {
       setIsSummaryLoading(false);
     }
