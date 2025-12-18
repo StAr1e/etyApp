@@ -211,8 +211,6 @@ Ety.ai runs entirely **inside Telegram** using a Web App + Bot hybrid model, req
 
 
 ### 1️⃣ Bot Launch & Home Screen
-
-### 1️⃣ Bot Launch & Home Screen
 ![Bot Launch](assets/images/screenshots/s1.jpeg)
 
 
