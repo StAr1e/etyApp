@@ -184,30 +184,56 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     if (!audioBlobUrl) return;
 
     const filename = `ety_ai_${data.word}.wav`;
+
+    if (navigator.share) {
+      try {
+        const response = await fetch(audioBlobUrl);
+        const blob = await response.blob();
+        const file = new File([blob], filename, { type: 'audio/wav' });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], title: `Ety.ai Audio: ${data.word}` });
+          return;
+        }
+      } catch (e) {
+        console.error("Audio share failed", e);
+      }
+    }
+
     const a = document.createElement('a');
     a.href = audioBlobUrl;
     a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-
-    if (window.Telegram?.WebApp && navigator.share) {
-      try {
-         const response = await fetch(audioBlobUrl);
-         const blob = await response.blob();
-         const file = new File([blob], filename, { type: 'audio/wav' });
-         if (navigator.canShare && navigator.canShare({ files: [file] })) {
-           await navigator.share({ files: [file], title: `Ety.ai: ${data.word}` });
-         }
-      } catch (e) {}
-    }
   };
 
   const handleDownloadImage = async () => {
     if (!aiImage) return;
+    const filename = `ety_ai_${data.word}.jpg`;
+
+    // Try Web Share API for better mobile/Telegram support
+    if (navigator.share) {
+      try {
+        const response = await fetch(aiImage);
+        const blob = await response.blob();
+        const file = new File([blob], filename, { type: 'image/jpeg' });
+        
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: `Ety.ai Image: ${data.word}`,
+          });
+          return;
+        }
+      } catch (e) {
+        console.error("Image share failed", e);
+      }
+    }
+
+    // Fallback to traditional anchor download
     const a = document.createElement('a');
     a.href = aiImage;
-    a.download = `ety_ai_${data.word}.jpg`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
