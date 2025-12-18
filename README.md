@@ -6,12 +6,19 @@ Ety.ai is a **full‑stack, serverless, AI‑powered web application** deeply in
 
 ---
 
+## 🔗 Live Links
+
+- **Vercel App:** [https://ety-app.vercel.app/](https://ety-app.vercel.app/)  
+- **Telegram Bot:** [https://t.me/newetybot](https://t.me/newetybot)
+
+---
+
 ## ✨ Key Features
 
 * 🔍 **AI‑Powered Word Discovery** – Etymology, roots, phonetics, synonyms & fun facts
 * 🧠 **Deep Dive Summaries** – Encyclopedia‑style explanations generated on demand
-* 🎙️ **Voice Narrator (TTS)** – High‑quality AI narration with real‑time audio encoding
-* 🎨 **AI Visuals** – Context‑aware illustrations generated per word
+* 🎙️ **Voice Narrator (TTS)** – High‑quality AI narration with real-time audio encoding
+* 🎨 **AI Visuals** – Context-aware illustrations generated per word
 * 🏆 **Gamification Engine** – XP, levels, badges, streaks & global leaderboard
 * 📲 **Native Telegram Integration** – Main Button, Back Button, haptics & theme sync
 * ⚡ **Serverless & Scalable** – Built for speed, reliability, and low latency
@@ -44,7 +51,7 @@ Ety.ai is a **full‑stack, serverless, AI‑powered web application** deeply in
 
 **Media Processing**
 
-* Raw PCM → WAV conversion (client‑side, real‑time)
+* Raw PCM → WAV conversion (client‑side, real-time)
 
 ---
 
@@ -54,33 +61,26 @@ Ety.ai is a **full‑stack, serverless, AI‑powered web application** deeply in
 
 1. User searches a word (e.g. *Galaxy*)
 2. **Hybrid Cache System**
-
    * L1: `localStorage`
-   * L2: Server in‑memory cache + MongoDB
+   * L2: Server in-memory cache + MongoDB
 3. AI generates structured JSON:
-
    * Etymology
    * Linguistic roots
    * Phonetics & synonyms
    * Fun facts
 4. AI visual is generated in parallel for instant engagement
 
----
-
 ### B. AI Deep Dive ✨
 
 * Triggered via **Telegram Main Button**
-* Generates a 4–6 sentence encyclopedia‑style summary
+* Generates a 4–6 sentence encyclopedia-style summary
 * Stored permanently in user history (no repeated XP cost)
-
----
 
 ### C. Voice Narrator 🎧
 
 1. TTS request sent to server
 2. Gemini generates raw PCM audio
 3. Frontend:
-
    * Decodes Base64
    * Converts to `Int16Array`
    * Wraps with RIFF/WAV header
@@ -91,8 +91,6 @@ Optimized for **mobile audio driver alignment**.
 ---
 
 ## 🎮 Gamification System
-
-Retention is powered by a custom XP & leveling engine.
 
 ### XP Triggers
 
@@ -125,7 +123,7 @@ Retention is powered by a custom XP & leveling engine.
 * 📳 **Haptic Feedback** – Search, success, warnings
 * 🎛️ **Native Controls** – Main Button & Back Button
 * 🎨 **Theme Sync** – Auto adapts to Telegram light/dark/custom themes
-* 🌗 **Auto Dark / Light Mode** – UI automatically toggles based on the user’s **mobile system theme** (Light/Dark), ensuring a native and consistent experience across devices
+* 🌗 **Auto Dark / Light Mode** – UI automatically toggles based on the user’s **mobile system theme**
 
 ---
 
@@ -133,10 +131,10 @@ Retention is powered by a custom XP & leveling engine.
 
 ### API Rate‑Limit Protection
 
-> ⚠️ **Note on AI Limits**
-> This project currently uses **unpaid / free‑tier AI APIs**, which may occasionally result in **rate‑limit or quota errors (e.g., 429 responses)** during high usage.
+> ⚠️ **Note on AI Limits**  
+> This project currently uses **unpaid / free-tier AI APIs**, which may occasionally result in **rate-limit or quota errors (e.g., 429 responses)** during high usage.
 
-To ensure a smooth user experience despite these limitations:
+To ensure smooth experience:
 
 * 🔁 **Sequential API Key Rotation** – Iterates through up to 5 API keys automatically
 * 🤝 **Graceful Fallbacks** – Returns friendly mock responses if all keys are exhausted
@@ -144,8 +142,8 @@ To ensure a smooth user experience despite these limitations:
 
 ### Audio Stability
 
-* Strict PCM byte‑alignment
-* Ensures glitch‑free playback on mobile devices
+* Strict PCM byte-alignment
+* Ensures glitch-free playback on mobile devices
 
 ---
 
@@ -161,62 +159,44 @@ To ensure a smooth user experience despite these limitations:
 
 ## 🤖 Telegram Bot Usage & Demo
 
-Ety.ai runs entirely **inside Telegram** using a Web App + Bot hybrid model, requiring **no external sign‑ups**.
-
-### How Users Interact
-
-1. Open the Telegram bot
-2. Tap **Launch** to open the Web App
-3. Type a word in the search bar (e.g., `Galaxy`)
+1. Open the Telegram bot  
+2. Tap **Launch** to open the Web App  
+3. Type a word in the search bar (e.g., `Galaxy`)  
 4. Instantly receive:
-
    * Etymology & linguistic roots
-   * AI‑generated visual
+   * AI-generated visual
    * XP rewards
 
-### Deep Dive Flow
+**Deep Dive Flow**  
 
-* Tap the **✨ AI DEEP DIVE** Telegram Main Button
-* Receive an encyclopedia‑style explanation
-* Summary is saved permanently to your profile
+* Tap **✨ AI DEEP DIVE** button
+* Receive an encyclopedia-style explanation
+* Summary is saved permanently
 
-### Voice Narration
+**Voice Narration**  
 
-* Tap the 🎧 narrator button
-* Hear the word history via AI voice narration
+* Tap 🎧 narrator button
+* Hear AI-generated voice
 
-### Inline Sharing Demo
+**Inline Sharing**  
 
 * Tap **Share**
 * Choose any chat or group
-* The bot posts a rich **Word Card** with:
+* Bot posts a rich **Word Card** with formatted text, emoji highlights, and **🔎 Explore More** deep link
 
-  * Formatted text
-  * Emoji highlights
-  * **🔎 Explore More** deep link back to the app
+**Native Telegram Features Used**
 
-### Native Telegram Features Used
-
-* Telegram Main Button & Back Button
+* Main & Back Button
 * Inline query switching (`switchInlineQuery`)
 * Haptic feedback
-* Auto Dark / Light theme sync
-
-> 💡 Designed to feel like a **native Telegram feature**, not a third‑party app.
+* Auto Dark/Light theme sync
 
 ---
 
-## 📸 Screenshots & Demo Placeholders
-
-
+## 📸 Screenshots & Demo
 
 ### 1️⃣ Bot Launch & Home Screen
 ![Bot Launch](assets/images/screenshots/s1.jpeg)
-
-
-Shows the first interaction when a user opens the bot and launches the Web App.
-
----
 
 ### 2️⃣ Word Search & AI Discovery
 ![Search Result](assets/images/screenshots/s2.jpeg)
@@ -224,34 +204,16 @@ Shows the first interaction when a user opens the bot and launches the Web App.
 ![Visual](assets/images/screenshots/s2_2.jpeg)
 ![XP Earned](assets/images/screenshots/s2_3.jpeg)
 
-
-```
-
-Highlights instant AI response.
-
----
-
 ### 3️⃣ AI Deep Dive (Main Button)
 ![Deep Dive](assets/images/screenshots/s3.jpeg)
 
-Demonstrates native Telegram UI control and long-form AI reasoning.
-
----
-
 ### 4️⃣ Words History
 ![History](assets/images/screenshots/s4.jpeg)
-```
 
-Displays user word history also can delete and clear history.
-
----
 ### 5️⃣ Profile, XP & Global Leaderboard
 ![Profile](assets/images/screenshots/s5.jpeg)
 ![XP Level](assets/images/screenshots/s5_1.jpeg)
-![Leaderboard](assets/images/screenshots/s5_3.jpeg)
-```
-
-Shows gamification, competition, and retention mechanics.
+![Leaderboard](assets/images/screenshots/s5_2.jpeg)
 
 ---
 
@@ -265,15 +227,14 @@ Shows gamification, competition, and retention mechanics.
 
 ## 📌 Vision
 
-Ety.ai is not just a dictionary — it’s a **learning loop**.
-
+Ety.ai is not just a dictionary — it’s a **learning loop**.  
 By combining AI, gamification, and social sharing inside Telegram, Ety.ai turns curiosity into a daily habit and learning into play.
 
 ---
 
 ## 👤 Author
 
-**Sayad Akbar**
+**Sayad Akbar**  
 Full‑Stack Developer • AI Builder • Open‑Source Enthusiast
 
 ---
