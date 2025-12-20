@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordData, TelegramWebApp } from '../types';
-import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
+import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle, Volume2, Sparkles, Zap } from 'lucide-react';
 import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
@@ -44,14 +44,22 @@ const createWavBlob = (pcmData: Int16Array, sampleRate: number): Blob => {
 };
 
 export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageLoaded, onShare }) => {
-  // Audio State
+  // Audio Player Core State
+  const [narratorType, setNarratorType] = useState<'AI' | 'FREE'>(
+    (localStorage.getItem('ety_narrator') as 'AI' | 'FREE') || 'AI'
+  );
   const [isPlaying, setIsPlaying] = useState(false);
   const [isAudioLoading, setIsAudioLoading] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1.0);
+  
+  // AI Audio (Gemini)
   const [audioBlobUrl, setAudioBlobUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
+  // Free Audio (Web Speech)
+  const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
+
   // Image State
   const [aiImage, setAiImage] = useState<string | null>(initialImage || null);
   const [isImageLoading, setIsImageLoading] = useState(false);
@@ -89,43 +97,85 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     }
     
     // Cleanup audio on word change
+    stopAllAudio();
     if (audioBlobUrl) {
       URL.revokeObjectURL(audioBlobUrl);
       setAudioBlobUrl(null);
     }
-    setIsPlaying(false);
     setAudioError(null);
   }, [data.word]);
+
+  const stopAllAudio = () => {
+    if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+    }
+    window.speechSynthesis.cancel();
+    setIsPlaying(false);
+  };
+
+  const toggleNarrator = () => {
+    stopAllAudio();
+    const next = narratorType === 'AI' ? 'FREE' : 'AI';
+    setNarratorType(next);
+    localStorage.setItem('ety_narrator', next);
+    setAudioError(null);
+    if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.selectionChanged();
+  };
+
+  // --- NATIVE TTS LOGIC ---
+  const playNativeSpeech = () => {
+    window.speechSynthesis.cancel();
+    
+    const text = `${data.word}. ${data.definition}. Origins: ${data.etymology.split('.')[0]}.`;
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Try to find a premium/natural voice
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => 
+      v.name.includes('Google') || 
+      v.name.includes('Premium') || 
+      v.name.includes('Natural') || 
+      v.name.includes('Enhanced')
+    );
+    
+    if (preferredVoice) utterance.voice = preferredVoice;
+    
+    utterance.rate = playbackRate;
+    utterance.pitch = 1.0;
+    
+    utterance.onstart = () => setIsPlaying(true);
+    utterance.onend = () => setIsPlaying(false);
+    utterance.onerror = () => {
+      setIsPlaying(false);
+      setAudioError("System voice failed");
+    };
+
+    speechRef.current = utterance;
+    window.speechSynthesis.speak(utterance);
+  };
 
   // --- AUDIO LOGIC ---
 
   const handleTogglePlay = async () => {
-    // If an error exists, clicking should retry
-    if (audioError) {
-      setAudioError(null);
-      // Wait a tiny bit before retry to ensure UI resets
-      setTimeout(() => startAudioFetch(), 100);
-      return;
-    }
-
     if (isPlaying) {
-      audioRef.current?.pause();
-      setIsPlaying(false);
+      stopAllAudio();
       return;
     }
 
-    if (audioBlobUrl) {
-      if(audioRef.current) {
-         audioRef.current.playbackRate = playbackRate;
-         audioRef.current.play().then(() => {
-           setIsPlaying(true);
-           setAudioError(null);
-         }).catch((err) => {
-           console.error("Playback Error:", err);
-           setAudioError("Playback error. Try again.");
-         });
-      }
+    if (narratorType === 'FREE') {
+      playNativeSpeech();
       return;
+    }
+
+    // AI Narrator logic
+    if (audioBlobUrl && audioRef.current) {
+        audioRef.current.playbackRate = playbackRate;
+        audioRef.current.play().then(() => {
+          setIsPlaying(true);
+          setAudioError(null);
+        }).catch(() => setAudioError("Playback error"));
+        return;
     }
 
     startAudioFetch();
@@ -135,15 +185,12 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     setIsAudioLoading(true);
     setAudioError(null);
     try {
-      // OPTIMIZATION: Truncate text to essentials to save quota/tokens
       const shortText = `${data.word}. ${data.definition}. Origins: ${data.etymology.split('.')[0]}.`;
-      
       const audioBuffer = await fetchPronunciation(shortText);
       
       if (audioBuffer && audioBuffer.byteLength > 0) {
         const alignedLength = audioBuffer.byteLength - (audioBuffer.byteLength % 2);
         const pcmData = new Int16Array(audioBuffer, 0, alignedLength / 2);
-        
         const wavBlob = createWavBlob(pcmData, 24000);
         const url = URL.createObjectURL(wavBlob);
         
@@ -153,27 +200,19 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
           audioRef.current.src = url;
           audioRef.current.load();
           audioRef.current.playbackRate = playbackRate;
-          
           audioRef.current.oncanplaythrough = () => {
-            audioRef.current?.play()
-              .then(() => {
-                setIsPlaying(true);
-                setAudioError(null);
-              })
-              .catch(() => setAudioError("Playback blocked"));
+            audioRef.current?.play().then(() => {
+              setIsPlaying(true);
+              setAudioError(null);
+            });
             audioRef.current!.oncanplaythrough = null;
           };
         }
       } else {
-        setAudioError("Daily limit reached");
+        setAudioError("AI Limit reached");
       }
     } catch (e: any) {
-      const msg = e.message?.toLowerCase() || "";
-      if (msg.includes("limit") || msg.includes("quota") || msg.includes("429")) {
-        setAudioError("Daily limit reached");
-      } else {
-        setAudioError("Voice service busy");
-      }
+      setAudioError("AI Limit reached");
     } finally {
       setIsAudioLoading(false);
     }
@@ -183,10 +222,21 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     const rates = [1.0, 1.25, 1.5, 2.0];
     const next = rates[(rates.indexOf(playbackRate) + 1) % rates.length];
     setPlaybackRate(next);
-    if (audioRef.current) audioRef.current.playbackRate = next;
+    if (narratorType === 'AI' && audioRef.current) audioRef.current.playbackRate = next;
+    if (narratorType === 'FREE' && isPlaying) {
+        // Speech API requires restarting to change speed on many browsers
+        stopAllAudio();
+        // The play command is triggered by user via isPlaying state transition usually, 
+        // but here we just update state and user has to play again or we auto-restart
+    }
   };
 
   const handleDownloadAudio = async () => {
+    if (narratorType === 'FREE') {
+      alert("System Voice is local only and cannot be downloaded. Switch to AI Narrator to save files.");
+      return;
+    }
+
     if (!audioBlobUrl) {
        await startAudioFetch();
        audioRef.current?.pause();
@@ -196,21 +246,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     if (!audioBlobUrl) return;
 
     const filename = `ety_ai_${data.word}.wav`;
-
-    if (navigator.share) {
-      try {
-        const response = await fetch(audioBlobUrl);
-        const blob = await response.blob();
-        const file = new File([blob], filename, { type: 'audio/wav' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: `Ety.ai Audio: ${data.word}` });
-          return;
-        }
-      } catch (e) {
-        console.error("Audio share failed", e);
-      }
-    }
-
     const a = document.createElement('a');
     a.href = audioBlobUrl;
     a.download = filename;
@@ -222,25 +257,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
   const handleDownloadImage = async () => {
     if (!aiImage) return;
     const filename = `ety_ai_${data.word}.jpg`;
-
-    if (navigator.share) {
-      try {
-        const response = await fetch(aiImage);
-        const blob = await response.blob();
-        const file = new File([blob], filename, { type: 'image/jpeg' });
-        
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: `Ety.ai Image: ${data.word}`,
-          });
-          return;
-        }
-      } catch (e) {
-        console.error("Image share failed", e);
-      }
-    }
-
     const a = document.createElement('a');
     a.href = aiImage;
     a.download = filename;
@@ -316,37 +332,56 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         </div>
 
         {/* Narrator Player UI */}
-        <div className={`relative z-10 bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border transition-colors ${audioError ? 'border-amber-500/30 bg-amber-500/5' : 'border-tg-hint/5'}`}>
-           <button 
-             onClick={handleTogglePlay}
-             disabled={isAudioLoading}
-             className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${audioError ? 'bg-amber-500 text-white' : 'bg-tg-button text-white'} ${isAudioLoading ? 'opacity-80' : ''}`}
-           >
-             {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : audioError ? <RefreshCw size={20} className="animate-reverse-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
-           </button>
-           
-           <div className="flex-1">
-              <div className={`text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5 ${audioError ? 'text-amber-600' : 'text-tg-hint'}`}>
-                {audioError ? (
-                  <>
-                    <AlertCircle size={12} />
-                    {audioError === "Daily limit reached" ? "Limit reached - Tap to retry" : audioError}
-                  </>
-                ) : isAudioLoading ? (
-                  'Waking narrator...'
-                ) : (
-                  'Voice Narrator'
-                )}
-              </div>
-              <div className="h-1 bg-tg-hint/10 rounded-full overflow-hidden">
-                 <div className={`h-full rounded-full transition-all duration-300 ${isPlaying ? 'bg-tg-button w-full animate-pulse' : 'w-0'}`}></div>
-              </div>
-           </div>
+        <div className="relative z-10 space-y-3">
+            <div className={`bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border transition-all ${audioError ? 'border-amber-500/40 bg-amber-500/5' : 'border-tg-hint/5'}`}>
+               <button 
+                 onClick={handleTogglePlay}
+                 disabled={isAudioLoading}
+                 className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${narratorType === 'FREE' ? 'bg-purple-600 text-white' : 'bg-tg-button text-white'} ${isAudioLoading ? 'opacity-80' : ''}`}
+               >
+                 {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+               </button>
+               
+               <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1.5">
+                      <div className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${audioError ? 'text-amber-600' : 'text-tg-hint'}`}>
+                        {narratorType === 'AI' ? <Sparkles size={12} className="text-tg-button" /> : <Volume2 size={12} className="text-purple-500" />}
+                        {narratorType === 'AI' ? 'AI Narrator' : 'Free Narrator'}
+                        {narratorType === 'FREE' && <span className="text-[9px] bg-purple-500/10 text-purple-600 px-1.5 py-0.5 rounded-full border border-purple-500/10">Unlimited</span>}
+                      </div>
+                      <button 
+                        onClick={toggleNarrator}
+                        className="text-[10px] font-bold text-tg-button hover:underline px-2 py-1 bg-tg-button/5 rounded-lg"
+                      >
+                        Switch to {narratorType === 'AI' ? 'Free' : 'AI'}
+                      </button>
+                  </div>
+                  <div className="h-1.5 bg-tg-hint/10 rounded-full overflow-hidden">
+                     <div className={`h-full rounded-full transition-all duration-300 ${isPlaying ? (narratorType === 'AI' ? 'bg-tg-button' : 'bg-purple-500') + ' w-full animate-pulse' : 'w-0'}`}></div>
+                  </div>
+               </div>
 
-           <div className="flex items-center gap-1">
-             <button onClick={cycleSpeed} className="p-2 text-tg-hint hover:text-tg-text text-xs font-bold w-12 text-center">{playbackRate}x</button>
-             <button onClick={handleDownloadAudio} className="p-2 text-tg-hint hover:text-tg-button" title="Save Audio"><Download size={18} /></button>
-           </div>
+               <div className="flex items-center gap-1">
+                 <button onClick={cycleSpeed} className="p-2 text-tg-hint hover:text-tg-text text-xs font-bold w-12 text-center">{playbackRate}x</button>
+                 {narratorType === 'AI' && <button onClick={handleDownloadAudio} className="p-2 text-tg-hint hover:text-tg-button" title="Save Audio"><Download size={18} /></button>}
+               </div>
+            </div>
+
+            {/* AI Limit Fallback Suggestion */}
+            {audioError === "AI Limit reached" && (
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex items-center justify-between animate-in slide-in-from-top-2">
+                   <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-xs font-medium">
+                      <Zap size={14} className="fill-amber-500 text-amber-500" />
+                      <span>AI Quota reached. Switch to Free Narrator?</span>
+                   </div>
+                   <button 
+                     onClick={() => { setNarratorType('FREE'); setAudioError(null); }}
+                     className="text-xs font-bold px-3 py-1 bg-amber-500 text-white rounded-lg active:scale-95 transition-transform"
+                   >
+                     Switch Now
+                   </button>
+                </div>
+            )}
         </div>
 
         <audio 
