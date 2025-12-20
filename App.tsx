@@ -7,7 +7,7 @@ import { HistoryModal } from './components/HistoryModal';
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo, deleteHistoryItem, clearUserHistory } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, Zap, Clock, Send, ServerCrash, Loader2 } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, Zap, Clock, Send, ServerCrash, Loader2, HelpCircle } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -176,6 +176,8 @@ export default function App() {
       setWordData(data);
       setView('result');
 
+      // If it's a mock because it's unknown, we still show the result but maybe don't award full search XP?
+      // For now, treat all searches as valid XP earners.
       if(user) {
          handleGamificationAction('SEARCH', { wordData: data }); 
       } else {
@@ -286,14 +288,22 @@ export default function App() {
 
       // Main Button Management
       if (view === 'result' && !showProfile && !showLeaderboard && !showHistoryModal && !showSummaryModal) {
+        // Only show Deep Dive button if the word is NOT a mock 'unknown'
+        const isUnknown = (wordData as any)?.mockReason === 'unknown';
+        
         tg.MainButton.setParams({
           text: '✨ AI DEEP DIVE',
           color: tg.themeParams.button_color || '#2481cc',
-          is_visible: true,
+          is_visible: !isUnknown,
           is_active: true
         });
-        tg.MainButton.show();
-        tg.MainButton.onClick(handleGenerateSummary);
+        
+        if (!isUnknown) {
+            tg.MainButton.show();
+            tg.MainButton.onClick(handleGenerateSummary);
+        } else {
+            tg.MainButton.hide();
+        }
       } else {
         tg.MainButton.hide();
         tg.MainButton.offClick(handleGenerateSummary);
@@ -305,11 +315,12 @@ export default function App() {
       tg.MainButton.offClick(handleGenerateSummary);
       tg.BackButton.offClick(handleBack);
     };
-  }, [view, showSummaryModal, showProfile, showLeaderboard, showHistoryModal, handleGenerateSummary, handleBack]);
+  }, [view, showSummaryModal, showProfile, showLeaderboard, showHistoryModal, handleGenerateSummary, handleBack, wordData]);
 
   const errorLower = error?.toLowerCase() || "";
   const isQuotaError = errorLower.includes("limit") || errorLower.includes("quota") || errorLower.includes("429");
   const isOverloaded = errorLower.includes("overloaded") || errorLower.includes("busy") || errorLower.includes("unavailable");
+  
   const levelInfo = getLevelInfo(userStats.xp);
   const nextLevelProgress = ((userStats.xp - levelInfo.minXP) / (levelInfo.nextLevelXP - levelInfo.minXP)) * 100;
   const currentHistoryItem = wordData ? history.find(h => h.word.toLowerCase() === wordData.word.toLowerCase()) : null;
@@ -400,8 +411,20 @@ export default function App() {
           {view === 'result' && wordData && !isLoading && (
              <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
                 {!window.Telegram?.WebApp && <button onClick={handleBack} className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"><span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Back</button>}
+                
+                {/* Special UI if word is Unknown */}
+                {(wordData as any).mockReason === 'unknown' && (
+                  <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-center gap-3 text-amber-600 dark:text-amber-400">
+                    <HelpCircle size={20} />
+                    <span className="text-sm font-bold uppercase tracking-wide">Mystery Word Detected</span>
+                  </div>
+                )}
+
                 <WordCard data={wordData} initialImage={initialImage} onImageLoaded={handleImageLoaded} onShare={() => user && handleGamificationAction('SHARE')} />
-                {!window.Telegram?.WebApp && <button onClick={handleGenerateSummary} className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"><Wand2 size={22} /> Generate Deep Dive</button>}
+                
+                {!window.Telegram?.WebApp && (wordData as any).mockReason !== 'unknown' && (
+                    <button onClick={handleGenerateSummary} className="w-full py-4 mt-6 bg-gradient-to-r from-tg-button to-blue-600 text-white rounded-xl font-bold text-lg shadow-lg shadow-tg-button/30 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"><Wand2 size={22} /> Generate Deep Dive</button>
+                )}
              </div>
           )}
         </main>

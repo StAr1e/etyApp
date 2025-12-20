@@ -2,10 +2,10 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { connectToDatabase, User } from '../lib/mongodb.js';
 
 // --- CONFIGURATION ---
-const CACHE_VERSION = 'v1'; 
+const CACHE_VERSION = 'v2'; 
 const TTL_SUCCESS = 24 * 60 * 60 * 1000; 
 const TTL_MOCK = 5 * 60 * 1000; 
-const DAILY_LIMIT = 30;
+const DAILY_LIMIT = 50;
 
 // In-memory cache
 const cache = new Map<string, { data: any, timestamp: number, isMock: boolean }>();
@@ -18,33 +18,45 @@ const getRotatedApiKey = () => {
         process.env.GEMINI_API_KEY_3,
         process.env.GEMINI_API_KEY_4,
         process.env.GEMINI_API_KEY_5
-    ].filter(k => !!k && k.length > 10); // Filter out undefined or empty
+    ].filter(k => !!k && k.length > 10);
 
     if (keys.length === 0) return null;
     return keys[Math.floor(Math.random() * keys.length)];
 };
 
 // --- MOCK DATA ---
-const getMockData = (word: string, reason: 'overload' | 'quota' = 'overload') => ({
-    word: word,
-    phonetic: `/${word.substring(0, 3)}.../`,
-    partOfSpeech: "symbol/unknown",
-    definition: reason === 'quota' 
-        ? "We hit our daily AI limit. This is a placeholder while we cool down." 
-        : "We are currently experiencing high traffic. This definition is temporarily unavailable.",
-    etymology: "The origins are temporarily obscured. Please try again in a few minutes.",
-    roots: [
-        { term: "System", language: "Digital", meaning: reason === 'quota' ? "Limit Reached" : "Overload" },
-        { term: "Retry", language: "Action", meaning: "Later" }
-    ],
-    examples: [`The term "${word}" is popular right now!`],
-    synonyms: ["Unavailable", "Pending"],
-    funFact: "This is a placeholder response.",
-    isMock: true,
-    mockReason: reason
-});
+const getMockData = (word: string, reason: 'overload' | 'quota' | 'unknown' = 'overload') => {
+    const data: any = {
+        word: word,
+        phonetic: "/.../",
+        partOfSpeech: reason === 'unknown' ? "unknown" : "symbol/term",
+        definition: "",
+        etymology: "",
+        roots: [],
+        examples: [],
+        synonyms: [],
+        funFact: "",
+        isMock: true,
+        mockReason: reason
+    };
 
-// Helper to retry generation
+    if (reason === 'quota') {
+        data.definition = "Daily AI usage limit reached. Our scribes are taking a break!";
+        data.etymology = "The history of this word is temporarily locked in the archives.";
+        data.funFact = "Check back tomorrow to unlock the full deep dive!";
+    } else if (reason === 'unknown') {
+        data.definition = `We couldn't find a historical record for "${word}". It might be a brand new invention or a very creative typo!`;
+        data.etymology = "This term is currently a linguistic mystery. Its origins are yet to be written.";
+        data.funFact = "Shakespeare invented over 1,700 words. Maybe this is your contribution to the language?";
+    } else {
+        data.definition = "The AI servers are currently busy thinking. This is a temporary placeholder.";
+        data.etymology = "Origins are briefly obscured. Please refresh in a moment.";
+        data.funFact = "Refreshing often clears the digital fog!";
+    }
+
+    return data;
+};
+
 const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
     for (let i = 0; i < retries; i++) {
         try {
@@ -52,70 +64,47 @@ const generateWithRetry = async (ai: GoogleGenAI, params: any, retries = 3) => {
         } catch (e: any) {
             const msg = (e.message || "").toLowerCase();
             const status = e.status;
-
             const isOverloaded = status === 503 || msg.includes('503') || msg.includes('overloaded');
-            
             if (isOverloaded && i < retries - 1) {
-                const delay = 1500 * Math.pow(2, i); 
+                const delay = 800 * Math.pow(2, i); 
                 await new Promise(r => setTimeout(r, delay));
                 continue;
             }
             throw e;
         }
     }
-    throw new Error("Model overloaded after retries");
+    throw new Error("Model overloaded");
 }
 
 export default async function handler(request: any, response: any) {
   try {
-    // 1. Get Rotated Key
     const apiKey = getRotatedApiKey();
-    if (!apiKey) {
-      return response.status(500).json({ error: "Configuration Error: No API Keys found." });
-    }
+    if (!apiKey) return response.status(500).json({ error: "Missing API Keys" });
 
     const { word, userId } = request.query;
-    if (!word) {
-      return response.status(400).json({ error: "Word parameter is required" });
-    }
+    if (!word) return response.status(400).json({ error: "Word required" });
 
-    // Allow symbols by just trimming, do not enforce text-only rules in backend
     const cleanWord = (word as string).trim().toLowerCase();
     const cacheKey = `${CACHE_VERSION}:details:${cleanWord}`;
 
-    // 2. Check Cache
     const cached = cache.get(cacheKey);
     if (cached) {
         const ttl = cached.isMock ? TTL_MOCK : TTL_SUCCESS;
-        if (Date.now() - cached.timestamp < ttl) {
-            return response.status(200).json(cached.data);
-        }
+        if (Date.now() - cached.timestamp < ttl) return response.status(200).json(cached.data);
     }
 
-    // 3. Check Daily Limit
     if (userId) {
        try {
          const db = await connectToDatabase();
          if (db) {
              const user = await User.findOne({ userId: userId.toString() });
-             if (user) {
-                 const today = new Date();
-                 today.setHours(0,0,0,0);
-                 const todayCount = user.searchHistory.filter((h: any) => h.timestamp > today.getTime()).length;
-                 
-                 // Bump limit to 50 since we have rotated keys now
-                 if (todayCount >= 50) { 
-                     const mock = getMockData(cleanWord, 'quota');
-                     return response.status(200).json(mock);
-                 }
+             if (user && user.searchHistory.filter((h: any) => h.timestamp > new Date().setHours(0,0,0,0)).length >= DAILY_LIMIT) {
+                 return response.status(200).json(getMockData(cleanWord, 'quota'));
              }
          }
-       } catch (dbErr) {
-           console.warn("DB Limit Check Failed:", dbErr);
-       }
+       } catch (dbErr) { console.warn("DB Limit Check Failed", dbErr); }
     }
 
-    // 4. Initialize Gemini
     const ai = new GoogleGenAI({ apiKey });
     
     const schema: Schema = {
@@ -140,59 +129,50 @@ export default async function handler(request: any, response: any) {
         examples: { type: Type.ARRAY, items: { type: Type.STRING } },
         synonyms: { type: Type.ARRAY, items: { type: Type.STRING } },
         funFact: { type: Type.STRING },
+        isUnknown: { type: Type.BOOLEAN, description: "True if the word is total gibberish and has no meaning." }
       },
       required: ["word", "phonetic", "definition", "etymology", "roots", "examples", "synonyms", "funFact"]
     };
 
     try {
         const result: any = await generateWithRetry(ai, {
-            model: 'gemini-2.5-flash',
-            contents: `Analyze "${cleanWord}". If this is a word, provide etymology. If this is a symbol (like @, &, #), explain its history/usage.
+            model: 'gemini-3-flash-preview',
+            contents: `Analyze the term "${cleanWord}". 
             
-            Format:
-            - word: "${cleanWord}"
-            - phonetic: Pronunciation (or N/A for symbols)
-            - definition: Concise meaning or usage.
-            - etymology: How it evolved or where it came from.
-            - roots: 2-3 historical origins (e.g. Latin term, or "ASCII" for symbols).
-            - examples: Usage in sentences or context.
-            - synonyms: Related concepts.
-            - funFact: A surprising fact about it.`,
+            DIRECTIONS:
+            1. TYPOS: If the word is misspelled (e.g., "galaxt"), correct it to the most likely word ("galaxy") and provide data for the CORRECTED word.
+            2. GIBBERISH: If the word is total nonsense (e.g., "xhqkpz"), set 'isUnknown' to true and provide a humorous, polite response in the definition.
+            3. SYMBOLS: If it is a symbol or emoji, explain its history.
+            
+            Be deep but concise. Format strictly as JSON.`,
             config: {
                 responseMimeType: 'application/json',
                 responseSchema: schema,
-                systemInstruction: "Expert etymologist and linguist. Handle words, phrases, and typographic symbols with depth.",
                 maxOutputTokens: 1000
             }
         });
 
-        let text = result.text;
-        if (!text) throw new Error("No text returned");
+        const parsedData = JSON.parse(result.text.replace(/^```(json)?/, '').replace(/```$/, ''));
         
-        text = text.replace(/^```(json)?/, '').replace(/```$/, '');
-        const parsedData = JSON.parse(text);
+        if (parsedData.isUnknown) {
+            const unknownMock = getMockData(cleanWord, 'unknown');
+            cache.set(cacheKey, { data: unknownMock, timestamp: Date.now(), isMock: true });
+            return response.status(200).json(unknownMock);
+        }
 
-        if (cache.size > 100) cache.delete(cache.keys().next().value!);
         cache.set(cacheKey, { data: parsedData, timestamp: Date.now(), isMock: false });
-
         return response.status(200).json(parsedData);
 
     } catch (aiError: any) {
-        console.error("AI Gen Failed:", aiError.message);
+        console.error("AI Error:", aiError.message);
         const msg = (aiError.message || "").toLowerCase();
-        
         const isQuota = aiError.status === 429 || msg.includes('429') || msg.includes('quota');
         const mock = getMockData(cleanWord, isQuota ? 'quota' : 'overload');
-        
         cache.set(cacheKey, { data: mock, timestamp: Date.now(), isMock: true });
         return response.status(200).json(mock);
     }
-
   } catch (error: any) {
-    console.error("Critical API Error:", error);
-    if (request.query.word) {
-        return response.status(200).json(getMockData(request.query.word as string));
-    }
-    return response.status(500).json({ error: "Internal Server Error" });
+    if (request.query.word) return response.status(200).json(getMockData(request.query.word as string));
+    return response.status(500).json({ error: "Internal Error" });
   }
 }
