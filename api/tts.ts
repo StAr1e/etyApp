@@ -1,13 +1,17 @@
+
 import { GoogleGenAI, Modality } from "@google/genai";
 
 const getApiKeys = () => {
-    return [
+    const keys = [
         process.env.GEMINI_API_KEY,
         process.env.GEMINI_API_KEY_2,
         process.env.GEMINI_API_KEY_3,
         process.env.GEMINI_API_KEY_4,
         process.env.GEMINI_API_KEY_5
     ].filter(k => !!k && k.length > 10) as string[];
+    
+    // Shuffle keys to distribute load randomly among users
+    return keys.sort(() => Math.random() - 0.5);
 };
 
 export default async function handler(request: any, response: any) {
@@ -21,7 +25,7 @@ export default async function handler(request: any, response: any) {
     return response.status(400).json({ error: "Text parameter is required" });
   }
 
-  // Sequential retry through all keys if 429 occurs
+  // Iterate through the shuffled keys
   for (let i = 0; i < keys.length; i++) {
     const apiKey = keys[i];
     const ai = new GoogleGenAI({ apiKey });
@@ -47,22 +51,23 @@ export default async function handler(request: any, response: any) {
       }
     } catch (error: any) {
       const msg = error.message?.toLowerCase() || "";
-      const isQuota = error.status === 429 || msg.includes('429') || msg.includes('quota');
+      const isQuota = error.status === 429 || msg.includes('429') || msg.includes('quota') || msg.includes('limit');
       
-      // If it's a quota error and we have more keys, continue to next key
+      console.warn(`TTS Key ${i+1} attempt failed: ${msg}`);
+
+      // If it's a quota error and we have more keys, try the next one
       if (isQuota && i < keys.length - 1) {
-        console.warn(`Key ${i+1} exhausted, trying next key...`);
         continue;
       }
       
       // If we've reached the last key and still have a quota error
       if (isQuota) {
-        return response.status(429).json({ error: "Narrator is resting (Daily limit reached). Please try again later." });
+        return response.status(429).json({ error: "The narrator is resting (Daily limit reached). Please try again in a few minutes." });
       }
       
       return response.status(500).json({ error: error.message || "Failed to generate audio" });
     }
   }
 
-  return response.status(429).json({ error: "All AI narrators are currently occupied. Please try later." });
+  return response.status(429).json({ error: "Our AI narrators are currently over capacity. Please try again shortly." });
 }

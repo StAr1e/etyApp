@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordData, TelegramWebApp } from '../types';
 import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
@@ -99,6 +100,14 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
   // --- AUDIO LOGIC ---
 
   const handleTogglePlay = async () => {
+    // If an error exists, clicking should retry
+    if (audioError) {
+      setAudioError(null);
+      // Wait a tiny bit before retry to ensure UI resets
+      setTimeout(() => startAudioFetch(), 100);
+      return;
+    }
+
     if (isPlaying) {
       audioRef.current?.pause();
       setIsPlaying(false);
@@ -119,15 +128,19 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
       return;
     }
 
+    startAudioFetch();
+  };
+
+  const startAudioFetch = async () => {
     setIsAudioLoading(true);
     setAudioError(null);
     try {
-      const fullText = `${data.word}. ${data.definition}. Historical origins: ${data.etymology}. Fun fact: ${data.funFact}`;
+      // OPTIMIZATION: Truncate text to essentials to save quota/tokens
+      const shortText = `${data.word}. ${data.definition}. Origins: ${data.etymology.split('.')[0]}.`;
       
-      const audioBuffer = await fetchPronunciation(fullText);
+      const audioBuffer = await fetchPronunciation(shortText);
       
       if (audioBuffer && audioBuffer.byteLength > 0) {
-        // Aligned length is crucial for Int16Array (each element is 2 bytes)
         const alignedLength = audioBuffer.byteLength - (audioBuffer.byteLength % 2);
         const pcmData = new Int16Array(audioBuffer, 0, alignedLength / 2);
         
@@ -141,7 +154,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
           audioRef.current.load();
           audioRef.current.playbackRate = playbackRate;
           
-          // Wait for browser to process the load event
           audioRef.current.oncanplaythrough = () => {
             audioRef.current?.play()
               .then(() => {
@@ -153,11 +165,11 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
           };
         }
       } else {
-        setAudioError("AI Daily limit reached");
+        setAudioError("Daily limit reached");
       }
     } catch (e: any) {
       const msg = e.message?.toLowerCase() || "";
-      if (msg.includes("limit") || msg.includes("quota")) {
+      if (msg.includes("limit") || msg.includes("quota") || msg.includes("429")) {
         setAudioError("Daily limit reached");
       } else {
         setAudioError("Voice service busy");
@@ -176,7 +188,7 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
 
   const handleDownloadAudio = async () => {
     if (!audioBlobUrl) {
-       await handleTogglePlay();
+       await startAudioFetch();
        audioRef.current?.pause();
        setIsPlaying(false);
     }
@@ -211,7 +223,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     if (!aiImage) return;
     const filename = `ety_ai_${data.word}.jpg`;
 
-    // Try Web Share API for better mobile/Telegram support
     if (navigator.share) {
       try {
         const response = await fetch(aiImage);
@@ -230,7 +241,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
       }
     }
 
-    // Fallback to traditional anchor download
     const a = document.createElement('a');
     a.href = aiImage;
     a.download = filename;
@@ -306,21 +316,30 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         </div>
 
         {/* Narrator Player UI */}
-        <div className={`relative z-10 bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border transition-colors ${audioError ? 'border-red-500/30' : 'border-tg-hint/5'}`}>
+        <div className={`relative z-10 bg-tg-secondaryBg/50 backdrop-blur-md rounded-2xl p-4 flex items-center gap-4 border transition-colors ${audioError ? 'border-amber-500/30 bg-amber-500/5' : 'border-tg-hint/5'}`}>
            <button 
              onClick={handleTogglePlay}
              disabled={isAudioLoading}
-             className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${audioError ? 'bg-red-500 text-white' : 'bg-tg-button text-white'}`}
+             className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${audioError ? 'bg-amber-500 text-white' : 'bg-tg-button text-white'} ${isAudioLoading ? 'opacity-80' : ''}`}
            >
-             {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : audioError ? <AlertCircle size={20} /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+             {isAudioLoading ? <Loader2 size={20} className="animate-spin" /> : audioError ? <RefreshCw size={20} className="animate-reverse-spin" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
            </button>
            
            <div className="flex-1">
-              <div className={`text-xs font-bold uppercase tracking-wider mb-1 ${audioError ? 'text-red-500' : 'text-tg-hint'}`}>
-                {audioError ? audioError : isAudioLoading ? 'Waking narrator...' : 'Voice Narrator'}
+              <div className={`text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5 ${audioError ? 'text-amber-600' : 'text-tg-hint'}`}>
+                {audioError ? (
+                  <>
+                    <AlertCircle size={12} />
+                    {audioError === "Daily limit reached" ? "Limit reached - Tap to retry" : audioError}
+                  </>
+                ) : isAudioLoading ? (
+                  'Waking narrator...'
+                ) : (
+                  'Voice Narrator'
+                )}
               </div>
               <div className="h-1 bg-tg-hint/10 rounded-full overflow-hidden">
-                 <div className={`h-full bg-tg-button rounded-full transition-all duration-300 ${isPlaying ? 'w-full animate-pulse' : 'w-0'}`}></div>
+                 <div className={`h-full rounded-full transition-all duration-300 ${isPlaying ? 'bg-tg-button w-full animate-pulse' : 'w-0'}`}></div>
               </div>
            </div>
 
