@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordData, TelegramWebApp } from '../types';
-import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle, Volume2, Sparkles, Zap, ChevronRight } from 'lucide-react';
+import { Play, Pause, Share2, GitFork, Lightbulb, Copy, Check, Users, BookOpenCheck, Download, Loader2, RefreshCw, AlertCircle, Volume2, Sparkles, Zap, ChevronRight, Layers } from 'lucide-react';
 import { fetchPronunciation, fetchWordImage } from '../services/geminiService';
 
 interface WordCardProps {
@@ -137,7 +137,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Fixed: Added handleDownloadAudio function
   const handleDownloadAudio = () => {
     if (!audioBlobUrl) return;
     const link = document.createElement('a');
@@ -190,10 +189,9 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
           )}
         </div>
 
-        {/* NEW RESPONSIVE NARRATOR PLAYER */}
+        {/* RESPONSIVE NARRATOR PLAYER */}
         <div className="bg-tg-secondaryBg/40 backdrop-blur-xl rounded-[2rem] p-4 border border-tg-hint/10">
           
-          {/* Mode Segmented Toggle */}
           <div className="flex bg-tg-bg/50 p-1 rounded-2xl mb-4 border border-tg-hint/5">
             <button 
               onClick={() => { setNarratorType('AI'); stopAllAudio(); }}
@@ -212,7 +210,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-4">
-            {/* Play Button */}
             <button 
               onClick={handleTogglePlay}
               disabled={isAudioLoading}
@@ -221,7 +218,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
               {isAudioLoading ? <Loader2 size={24} className="animate-spin" /> : isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" className="ml-1 group-hover:scale-110 transition-transform" />}
             </button>
 
-            {/* Info & Progress */}
             <div className="flex-1 w-full text-center sm:text-left">
               <div className="flex items-center justify-center sm:justify-between mb-2">
                 <span className={`text-[10px] font-black uppercase tracking-widest ${audioError ? 'text-amber-600' : 'text-tg-hint'}`}>
@@ -240,7 +236,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
               </div>
             </div>
 
-            {/* Speed & Tools */}
             <div className="flex items-center gap-3 shrink-0">
                <button 
                 onClick={() => setPlaybackRate(r => r >= 2 ? 1 : r + 0.25)} 
@@ -256,7 +251,6 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
             </div>
           </div>
           
-          {/* Mobile Fallback Prompt */}
           {audioError === "AI Limit reached" && narratorType === 'AI' && (
             <button 
               onClick={() => { setNarratorType('FREE'); setAudioError(null); }}
@@ -306,12 +300,34 @@ export const WordCard: React.FC<WordCardProps> = ({ data, initialImage, onImageL
         </div>
       </div>
 
-      {/* Fun Fact */}
-      <div className="bg-gradient-to-br from-yellow-400/5 to-orange-500/5 rounded-[2.5rem] p-6 border border-yellow-500/10 flex items-start gap-4 shadow-sm">
-        <div className="p-3 bg-yellow-400/10 text-yellow-600 rounded-2xl shrink-0"><Lightbulb size={24} /></div>
-        <div>
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-yellow-700 mb-1 opacity-80">Did you know?</h3>
-          <p className="text-base font-medium text-tg-text/90 leading-relaxed italic">"{data.funFact}"</p>
+      {/* Fun Fact & Synonyms Combined Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Fun Fact */}
+        <div className="md:col-span-2 bg-gradient-to-br from-yellow-400/5 to-orange-500/5 rounded-[2.5rem] p-6 border border-yellow-500/10 flex items-start gap-4 shadow-sm">
+          <div className="p-3 bg-yellow-400/10 text-yellow-600 rounded-2xl shrink-0"><Lightbulb size={24} /></div>
+          <div>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-yellow-700 mb-1 opacity-80">Did you know?</h3>
+            <p className="text-base font-medium text-tg-text/90 leading-relaxed italic">"{data.funFact}"</p>
+          </div>
+        </div>
+
+        {/* Synonyms */}
+        <div className="bg-tg-bg rounded-[2.5rem] p-6 border border-tg-hint/10 shadow-soft flex flex-col">
+          <div className="flex items-center gap-2 mb-4 text-emerald-600">
+            <Layers size={18} />
+            <h2 className="font-black uppercase tracking-widest text-xs">Echoes</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+             {data.synonyms.length > 0 ? (
+               data.synonyms.slice(0, 5).map(syn => (
+                 <span key={syn} className="px-3 py-1.5 bg-tg-secondaryBg rounded-xl text-xs font-bold text-tg-text/70 border border-tg-hint/5">
+                   {syn}
+                 </span>
+               ))
+             ) : (
+               <span className="text-xs text-tg-hint italic">No echoes found.</span>
+             )}
+          </div>
         </div>
       </div>
     </div>
