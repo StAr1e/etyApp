@@ -55,63 +55,48 @@ Ety.ai is a **full‑stack, serverless, AI‑powered web application** deeply in
 
 ---
 
-🔄 Core Workflows
-A. Search & Discovery
+## 🔄 Core Workflows
 
-User searches a word (e.g. Galaxy)
+### A. Search & Discovery
 
-Hybrid Cache System
+1. User searches a word (e.g. *Galaxy*)
+2. **Hybrid Cache System**
+   * L1: `localStorage`
+   * L2: Server in-memory cache + MongoDB
+3. AI generates structured JSON:
+   * Etymology
+   * Linguistic roots
+   * Phonetics & synonyms
+   * Fun facts
+4. AI visual is generated in parallel for instant engagement
 
-L1: localStorage
+### B. AI Deep Dive ✨
 
-L2: Server in-memory cache + MongoDB
+* Triggered via **Telegram Main Button**
+* Generates a 4–6 sentence encyclopedia-style summary
+* Stored permanently in user history (no repeated XP cost)
 
-AI generates structured JSON:
-
-Etymology
-
-Linguistic roots
-
-Phonetics & synonyms
-
-Fun facts
-
-AI visual is generated in parallel
-
-B. AI Deep Dive ✨
-
-Triggered via Telegram Main Button
-
-Generates a 4–6 sentence encyclopedia-style summary
-
-Stored permanently in user history (no repeated XP cost)
-
-🔊 Smart Voice Narration System
-
+### C. Voice Narrator 🎧
 Ety.ai includes a dual-mode narrator system designed for quality, reliability, and zero interruptions.
 
-🎙️ Narrator Modes
 🤖 AI Narrator (Gemini)
-
-High-quality AI-generated narration
-
-Natural pronunciation & pacing
-
-Best for immersive learning
+1. TTS request sent to server
+2. Gemini generates raw PCM audio
+3. Frontend:
+   * Decodes Base64
+   * Converts to `Int16Array`
+   * Wraps with RIFF/WAV header
+4. Plays instantly via `AudioContext`
 
 🔊 Free Narrator (System Voice)
+1. Powered by the Web Speech API
+2. Unlimited usage (no quotas)
+3. Automatically selects the most natural-sounding system voice, such as
+   * Google UK English
+   * Apple Samantha
+   * Or best available voice on the device
 
-Powered by the Web Speech API
-
-Unlimited usage (no quotas)
-
-Automatically selects the most natural-sounding system voice, such as:
-
-Google UK English
-
-Apple Samantha
-
-Or best available voice on the device
+Optimized for **mobile audio driver alignment**.
 
 ---
 
