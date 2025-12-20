@@ -187,6 +187,7 @@ To ensure smooth experience:
 
 * Tap 🎧 narrator button
 * Hear AI-generated voice
+* Free Narrator (System Voice)
 
 **Inline Sharing**  
 
