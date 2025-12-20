@@ -1,5 +1,4 @@
 
-
 export interface RootOrigin {
   term: string;
   language: string;
@@ -16,6 +15,7 @@ export interface WordData {
   examples: string[];
   synonyms: string[];
   funFact: string;
+  correctedFrom?: string; // Original misspelled word
 }
 
 export interface SearchHistoryItem {
@@ -28,7 +28,6 @@ export interface SearchHistoryItem {
 
 // --- Gamification Types ---
 
-// Badges are now dynamic strings like "scholar_1", "scholar_2", etc.
 export type BadgeId = string; 
 
 export type BadgeCategory = 'SCHOLAR' | 'VISIONARY' | 'AMBASSADOR' | 'DEVOTEE';

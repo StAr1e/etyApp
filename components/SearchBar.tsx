@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, ArrowRight, CornerDownLeft } from 'lucide-react';
 import { SearchHistoryItem } from '../types';
@@ -7,12 +8,20 @@ interface SearchBarProps {
   isLoading: boolean;
   history: SearchHistoryItem[];
   onHistorySelect: (term: string) => void;
+  queryValue?: string; // Controlled value from parent
 }
 
-export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, history, onHistorySelect }) => {
+export const SearchBar: React.FC<SearchBarProps> = ({ onSearch, isLoading, history, onHistorySelect, queryValue }) => {
   const [query, setQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync with external queryValue (e.g. for auto-correction)
+  useEffect(() => {
+    if (queryValue !== undefined && queryValue !== query) {
+      setQuery(queryValue);
+    }
+  }, [queryValue]);
 
   // Filter history based on input
   const filteredHistory = query 

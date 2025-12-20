@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { SearchBar } from './components/SearchBar';
 import { WordCard } from './components/WordCard';
@@ -7,7 +8,7 @@ import { HistoryModal } from './components/HistoryModal';
 import type { WordData, SearchHistoryItem, TelegramUser, UserStats } from './types';
 import { fetchWordDetails, fetchWordSummary } from './services/geminiService';
 import { INITIAL_STATS, fetchUserStats, trackAction, getLevelInfo, deleteHistoryItem, clearUserHistory } from './services/gamification';
-import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, Zap, Clock, Send, ServerCrash, Loader2, HelpCircle } from 'lucide-react';
+import { Sparkles, X, Wand2, User as UserIcon, AlertTriangle, CloudOff, Trophy, Crown, Zap, Clock, Send, ServerCrash, Loader2, HelpCircle, Info } from 'lucide-react';
 
 export default function App() {
   const [wordData, setWordData] = useState<WordData | null>(null);
@@ -16,6 +17,7 @@ export default function App() {
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
   const [view, setView] = useState<'home' | 'result'>('home');
   const [user, setUser] = useState<TelegramUser | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Gamification State
   const [userStats, setUserStats] = useState<UserStats>(INITIAL_STATS);
@@ -159,6 +161,7 @@ export default function App() {
     setError(null);
     setWordData(null); 
     setSummary(null);
+    setSearchQuery(term);
 
     try {
       if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
@@ -173,11 +176,15 @@ export default function App() {
           data = await fetchWordDetails(term, user?.id);
       }
       
+      // Auto-correct Search UI
+      if (data.correctedFrom || data.word.toLowerCase() !== term.toLowerCase()) {
+         setSearchQuery(data.word);
+         if (window.Telegram?.WebApp) window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+      }
+
       setWordData(data);
       setView('result');
 
-      // If it's a mock because it's unknown, we still show the result but maybe don't award full search XP?
-      // For now, treat all searches as valid XP earners.
       if(user) {
          handleGamificationAction('SEARCH', { wordData: data }); 
       } else {
@@ -207,6 +214,7 @@ export default function App() {
      if (item.data) {
        setWordData(item.data);
        setSummary(item.summary || null);
+       setSearchQuery(item.word);
        setView('result');
        setShowHistoryModal(false);
      } else {
@@ -378,7 +386,12 @@ export default function App() {
 
         <main className={`relative z-10 transition-all duration-500 ${view === 'result' ? 'mt-4' : 'mt-8'}`}>
           <div className={`${view === 'result' ? '' : 'max-w-md mx-auto'}`}>
-            <SearchBar onSearch={handleSearch} isLoading={isLoading} history={history} onHistorySelect={(term) => {
+            <SearchBar 
+              onSearch={handleSearch} 
+              isLoading={isLoading} 
+              history={history} 
+              queryValue={searchQuery}
+              onHistorySelect={(term) => {
                  const historyItem = history.find(h => h.word.toLowerCase() === term.toLowerCase());
                  if (historyItem) handleRestoreFromHistory(historyItem); else handleSearch(term);
               }}
@@ -412,6 +425,14 @@ export default function App() {
              <div className="mt-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
                 {!window.Telegram?.WebApp && <button onClick={handleBack} className="mb-4 text-tg-hint hover:text-tg-text flex items-center gap-2 text-sm font-bold uppercase tracking-wide transition-colors group"><span className="group-hover:-translate-x-1 transition-transform">&larr;</span> Back</button>}
                 
+                {/* Spelling Correction Banner */}
+                {wordData.correctedFrom && (
+                  <div className="mb-4 bg-blue-500/10 border border-blue-500/20 p-3 rounded-2xl flex items-center gap-3 text-blue-600 dark:text-blue-400 animate-in slide-in-from-top-2">
+                    <Info size={18} />
+                    <span className="text-xs font-bold leading-tight">Corrected spelling from <span className="italic line-through opacity-60">"{wordData.correctedFrom}"</span></span>
+                  </div>
+                )}
+
                 {/* Special UI if word is Unknown */}
                 {(wordData as any).mockReason === 'unknown' && (
                   <div className="mb-6 bg-amber-500/10 border border-amber-500/20 p-4 rounded-2xl flex items-center gap-3 text-amber-600 dark:text-amber-400">

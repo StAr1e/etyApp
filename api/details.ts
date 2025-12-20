@@ -1,8 +1,9 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { connectToDatabase, User } from '../lib/mongodb.js';
 
 // --- CONFIGURATION ---
-const CACHE_VERSION = 'v2'; 
+const CACHE_VERSION = 'v3'; 
 const TTL_SUCCESS = 24 * 60 * 60 * 1000; 
 const TTL_MOCK = 5 * 60 * 1000; 
 const DAILY_LIMIT = 50;
@@ -111,6 +112,7 @@ export default async function handler(request: any, response: any) {
       type: Type.OBJECT,
       properties: {
         word: { type: Type.STRING },
+        correctedFrom: { type: Type.STRING, description: "If the user provided a misspelled word, put the original misspelling here. Otherwise leave empty." },
         phonetic: { type: Type.STRING },
         partOfSpeech: { type: Type.STRING },
         definition: { type: Type.STRING },
@@ -139,10 +141,10 @@ export default async function handler(request: any, response: any) {
             model: 'gemini-3-flash-preview',
             contents: `Analyze the term "${cleanWord}". 
             
-            DIRECTIONS:
-            1. TYPOS: If the word is misspelled (e.g., "galaxt"), correct it to the most likely word ("galaxy") and provide data for the CORRECTED word.
-            2. GIBBERISH: If the word is total nonsense (e.g., "xhqkpz"), set 'isUnknown' to true and provide a humorous, polite response in the definition.
-            3. SYMBOLS: If it is a symbol or emoji, explain its history.
+            STRICT SPELLING RULES:
+            1. If "${cleanWord}" is an obvious typo of a common word (e.g. "galaxt" -> "galaxy", "speling" -> "spelling"), provide the correct spelling in the "word" field and set "correctedFrom" to "${cleanWord}".
+            2. If it is a real slang word or a less common but correct term, keep it as is.
+            3. GIBBERISH: If the word is total nonsense (e.g. "xhqkpz"), set 'isUnknown' to true.
             
             Be deep but concise. Format strictly as JSON.`,
             config: {
@@ -158,6 +160,11 @@ export default async function handler(request: any, response: any) {
             const unknownMock = getMockData(cleanWord, 'unknown');
             cache.set(cacheKey, { data: unknownMock, timestamp: Date.now(), isMock: true });
             return response.status(200).json(unknownMock);
+        }
+
+        // Final check: if word changed but correctedFrom wasn't set, set it manually
+        if (parsedData.word.toLowerCase() !== cleanWord && !parsedData.correctedFrom) {
+            parsedData.correctedFrom = cleanWord;
         }
 
         cache.set(cacheKey, { data: parsedData, timestamp: Date.now(), isMock: false });
